@@ -133,7 +133,7 @@ tzlocal>=5.0
 watchdog>=3.0.0
 
 # Backup and Compression
-python-zip>=0.1.2
+#python-zip>=0.1.2
 
 # Performance Monitoring
 py-spy>=0.3.14
