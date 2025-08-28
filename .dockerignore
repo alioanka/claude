@@ -31,12 +31,12 @@ logs/
 mlruns/
 
 # Data / Models / Artifacts
-data/
+#data/
 dataset*/
 datasets*/
 checkpoints/
-model*/
-models*/
+#model*/
+#models*/
 weights*/
 *.h5
 *.pt

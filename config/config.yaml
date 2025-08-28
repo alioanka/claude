@@ -1,0 +1,143 @@
+# Trading Bot Configuration
+
+# Database Configuration
+database:
+  host: "trading-postgres"  # Docker service name
+  port: 5432
+  username: "trading_user"
+  password: "trading_pass"
+  database: "trading_bot"
+  
+# Redis Configuration
+redis:
+  host: "trading-redis"  # Docker service name
+  port: 6379
+  password: ""
+  db: 0
+
+# Trading Configuration
+trading:
+  initial_capital: 100000
+  max_position_size: 0.1  # 10% of portfolio per position
+  stop_loss: 0.02         # 2% stop loss
+  take_profit: 0.04       # 4% take profit
+  max_drawdown: 0.15      # 15% maximum drawdown
+  commission_rate: 0.001  # 0.1% commission
+  slippage_rate: 0.0005   # 0.05% slippage
+  
+# Exchange Configuration
+exchanges:
+  binance:
+    enabled: true
+    testnet: true
+    api_key: ""
+    api_secret: ""
+    
+# Data Sources
+data:
+  symbols: 
+    - "BTC/USDT"
+    - "ETH/USDT" 
+    - "SOL/USDT"
+    - "ADA/USDT"
+    - "MATIC/USDT"
+  timeframe: "1h"
+  lookback_days: 365
+  cache_enabled: true
+  cache_dir: "data/cache"
+
+# Machine Learning Configuration
+ml:
+  train_size: 0.7
+  validation_size: 0.15
+  test_size: 0.15
+  random_state: 42
+  auto_retrain_days: 7
+  model_save_path: "storage/models"
+
+# Strategy Configuration
+strategies:
+  mean_reversion:
+    enabled: true
+    lookback_period: 20
+    entry_threshold: 2.0    # Bollinger Band standard deviations
+    exit_threshold: 0.5
+    stop_loss: 0.03
+    take_profit: 0.06
+    
+  ml_strategy:
+    enabled: false
+    model_type: "random_forest"
+    retrain_frequency: 168  # hours (1 week)
+    confidence_threshold: 0.6
+
+# Risk Management
+risk:
+  max_open_positions: 5
+  max_daily_loss: 0.05     # 5% max daily loss
+  position_sizing_method: "percent_risk"
+  default_risk_per_trade: 0.02  # 2% risk per trade
+  
+# Notifications
+notifications:
+  enabled: true
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: ""
+  email:
+    enabled: false
+    smtp_server: ""
+    smtp_port: 587
+    username: ""
+    password: ""
+    to_email: ""
+    
+# API Configuration  
+api:
+  host: "0.0.0.0"
+  port: 8000
+  debug: false
+  cors_origins: ["*"]
+  
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/trading_bot.log"
+  max_file_size: 10485760  # 10MB
+  backup_count: 5
+  console: true
+  database: true
+
+# Monitoring
+monitoring:
+  enabled: true
+  metrics_interval: 300    # 5 minutes
+  health_check_interval: 60 # 1 minute
+  
+# Backtesting
+backtesting:
+  initial_capital: 100000
+  commission_rate: 0.001
+  slippage_rate: 0.0005
+  start_date: "2023-01-01"
+  end_date: "2024-12-31"
+  
+# Data Cleanup
+cleanup:
+  enabled: true
+  run_hour: 2              # Run at 2 AM
+  days_to_keep: 90         # Keep 90 days of data
+  
+# Security
+security:
+  max_api_requests_per_minute: 100
+  require_api_key: false
+  api_key: ""
+  
+# Development Settings
+development:
+  debug: true
+  hot_reload: true
+  profiling: false
