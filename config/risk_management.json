@@ -1,0 +1,42 @@
+{
+    "position_sizing": {
+      "max_position_size_percent": 10,
+      "base_position_size_percent": 2,
+      "max_total_exposure_percent": 50,
+      "min_position_size_usd": 10
+    },
+    "stop_loss": {
+      "default_stop_loss_percent": 5,
+      "trailing_stop_enabled": true,
+      "trailing_stop_percent": 3,
+      "max_stop_loss_percent": 15
+    },
+    "take_profit": {
+      "default_take_profit_percent": 10,
+      "partial_take_profit_enabled": true,
+      "partial_take_profit_levels": [5, 8, 12],
+      "partial_take_profit_percentages": [25, 35, 40]
+    },
+    "drawdown_protection": {
+      "max_daily_loss_percent": 5,
+      "max_weekly_loss_percent": 15,
+      "max_monthly_loss_percent": 25,
+      "pause_trading_on_limit": true
+    },
+    "volatility_adjustment": {
+      "enabled": true,
+      "low_volatility_multiplier": 1.5,
+      "high_volatility_multiplier": 0.7,
+      "volatility_threshold_low": 0.02,
+      "volatility_threshold_high": 0.08
+    },
+    "correlation_limits": {
+      "max_correlated_positions": 3,
+      "correlation_threshold": 0.7
+    },
+    "market_conditions": {
+      "bull_market_max_positions": 10,
+      "bear_market_max_positions": 5,
+      "sideways_market_max_positions": 7
+    }
+  }

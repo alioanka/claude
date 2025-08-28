@@ -106,7 +106,7 @@ Thumbs.db
 *.old
 
 # Configuration overrides (keep examples)
-config/*.json
+#config/*.json
 !config/*.json.example
 
 # API keys and credentials

@@ -1,0 +1,170 @@
+{
+    "strategy_allocation": {
+        "momentum_strategy": 0.3,
+        "mean_reversion": 0.25,
+        "ml_strategy": 0.35,
+        "arbitrage_strategy": 0.1
+    },
+    "momentum_strategy": {
+        "name": "Enhanced Momentum Strategy",
+        "enabled": true,
+        "timeframes": ["15m", "1h", "4h"],
+        "indicators": {
+            "ema_fast": 12,
+            "ema_slow": 26,
+            "rsi_period": 14,
+            "rsi_overbought": 70,
+            "rsi_oversold": 30,
+            "macd": {
+                "fast": 12,
+                "slow": 26,
+                "signal": 9
+            },
+            "bollinger_bands": {
+                "period": 20,
+                "std_dev": 2
+            }
+        },
+        "entry_conditions": {
+            "long": {
+                "ema_cross": true,
+                "rsi_range": [30, 70],
+                "macd_positive": true,
+                "volume_surge": 1.5
+            },
+            "short": {
+                "ema_cross": true,
+                "rsi_range": [30, 70],
+                "macd_negative": true,
+                "volume_surge": 1.5
+            }
+        },
+        "exit_conditions": {
+            "stop_loss": 0.03,
+            "take_profit": 0.06,
+            "trailing_stop": 0.02,
+            "rsi_extreme": true
+        },
+        "position_sizing": {
+            "method": "kelly_criterion",
+            "max_position": 0.2,
+            "volatility_adjustment": true
+        }
+    },
+    "mean_reversion": {
+        "name": "Statistical Mean Reversion",
+        "enabled": true,
+        "timeframes": ["5m", "15m", "1h"],
+        "indicators": {
+            "bollinger_bands": {
+                "period": 20,
+                "std_dev": 2.5
+            },
+            "rsi_period": 14,
+            "stochastic": {
+                "k_period": 14,
+                "d_period": 3
+            },
+            "z_score_period": 50
+        },
+        "entry_conditions": {
+            "long": {
+                "price_below_lower_bb": true,
+                "rsi_oversold": 25,
+                "stochastic_oversold": 20,
+                "z_score_threshold": -2
+            },
+            "short": {
+                "price_above_upper_bb": true,
+                "rsi_overbought": 75,
+                "stochastic_overbought": 80,
+                "z_score_threshold": 2
+            }
+        },
+        "exit_conditions": {
+            "stop_loss": 0.025,
+            "take_profit": 0.04,
+            "mean_revert_signal": true,
+            "time_limit": 240
+        }
+    },
+    "ml_strategy": {
+        "name": "Machine Learning Ensemble",
+        "enabled": true,
+        "models": {
+            "xgboost": {
+                "enabled": true,
+                "weight": 0.3,
+                "features": ["technical", "market_structure", "sentiment"],
+                "lookback_period": 100,
+                "retrain_frequency": 24
+            },
+            "lstm": {
+                "enabled": true,
+                "weight": 0.4,
+                "sequence_length": 60,
+                "features": ["ohlcv", "technical"],
+                "retrain_frequency": 48
+            },
+            "transformer": {
+                "enabled": true,
+                "weight": 0.3,
+                "attention_heads": 8,
+                "features": ["ohlcv", "technical", "sentiment"],
+                "retrain_frequency": 72
+            }
+        },
+        "feature_engineering": {
+            "technical_indicators": [
+                "sma", "ema", "rsi", "macd", "bb", "stoch", "atr", "obv"
+            ],
+            "price_features": [
+                "returns", "log_returns", "volatility", "price_change"
+            ],
+            "volume_features": [
+                "volume_sma", "volume_ratio", "vwap", "volume_profile"
+            ],
+            "market_structure": [
+                "support_resistance", "trend_strength", "momentum"
+            ]
+        },
+        "prediction_threshold": 0.6,
+        "ensemble_method": "weighted_average",
+        "confidence_scaling": true
+    },
+    "arbitrage_strategy": {
+        "name": "Statistical Arbitrage",
+        "enabled": true,
+        "pairs": [
+            ["BTCUSDT", "ETHUSDT"],
+            ["ADAUSDT", "DOTUSDT"],
+            ["LINKUSDT", "AVAXUSDT"]
+        ],
+        "correlation_threshold": 0.8,
+        "spread_threshold": 0.02,
+        "lookback_period": 50,
+        "z_score_entry": 2.0,
+        "z_score_exit": 0.5,
+        "max_holding_time": 120
+    },
+    "strategy_selection": {
+        "method": "dynamic_allocation",
+        "rebalance_frequency": 1,
+        "performance_window": 168,
+        "min_allocation": 0.05,
+        "max_allocation": 0.5,
+        "selection_criteria": {
+            "sharpe_ratio": 0.4,
+            "win_rate": 0.3,
+            "max_drawdown": 0.2,
+            "recent_performance": 0.1
+        }
+    },
+    "global_settings": {
+        "max_concurrent_trades": 10,
+        "correlation_limit": 0.7,
+        "volatility_filter": true,
+        "news_filter": true,
+        "market_hours_only": false
+    }
+}

@@ -31,8 +31,8 @@ requests>=2.31.0
 
 # Notifications
 python-telegram-bot>=20.5
-smtplib
-email-validator>=2.0.0
+#smtplib
+#email-validator>=2.0.0
 
 # Monitoring and Logging
 prometheus-client>=0.17.0
