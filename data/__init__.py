@@ -7,7 +7,6 @@ from .database import (
     DatabaseManager,
     Trade,
     Position,
-    MarketData,
     Signal,
     PerformanceMetrics,
     SystemLog,
