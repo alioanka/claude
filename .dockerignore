@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.venv*/
+venv*/
+.mypy_cache/
+.pytest_cache/
+build/
+dist/
+pip-wheel-metadata/
+
+# VCS / IDE
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Node
+node_modules/
+
+# Logs / Temp / Caches
+logs/
+*.log
+*.tmp
+.cache/
+.wandb/
+mlruns/
+
+# Data / Models / Artifacts
+data/
+dataset*/
+datasets*/
+checkpoints/
+model*/
+models*/
+weights*/
+*.h5
+*.pt
+*.pth
+*.onnx
+*.npz
+*.pickle
+*.pkl
+*.parquet
+*.csv
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
