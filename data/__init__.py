@@ -1,51 +1,32 @@
 """
-Data package for trading bot.
-Handles data storage, retrieval, and database operations.
+Data package initialization.
+Exports all database models and data processing utilities.
 """
 
 from .database import (
     DatabaseManager,
+    MarketData, 
+    Position, 
     Trade,
-    Position,
     Signal,
-    PerformanceMetrics,
-    SystemLog,
-    get_database,
-    init_database,
-    close_database
+    Base
 )
 
-from .market_data import (
-    MarketDataManager,
-    YahooFinanceSource,
-    CCXTSource,
-    AlphaVantageSource,
-    get_market_data,
-    stream_market_data
-)
-
-from .data_processor import (
-    DataProcessor,
-    DataPipeline
-)
+# Import data processing utilities
+try:
+    from .data_processor import DataProcessor
+    from .data_collector import DataCollector
+except ImportError:
+    # These modules might not exist yet
+    pass
 
 __all__ = [
     'DatabaseManager',
-    'Trade',
-    'Position', 
     'MarketData',
+    'Position', 
+    'Trade',
     'Signal',
-    'PerformanceMetrics',
-    'SystemLog',
-    'get_database',
-    'init_database',
-    'close_database',
-    'MarketDataManager',
-    'YahooFinanceSource',
-    'CCXTSource', 
-    'AlphaVantageSource',
-    'get_market_data',
-    'stream_market_data',
+    'Base',
     'DataProcessor',
-    'DataPipeline'
+    'DataCollector'
 ]
