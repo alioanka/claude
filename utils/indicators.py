@@ -6,8 +6,14 @@ Provides optimized calculations for various technical analysis indicators.
 import pandas as pd
 import numpy as np
 from typing import Union, List, Optional, Tuple
-import talib
 from scipy.signal import argrelextrema
+
+try:
+    import talib
+    TALIB_AVAILABLE = True
+except ImportError:
+    TALIB_AVAILABLE = False
+    print("TA-Lib not available, using native implementations")
 
 class TechnicalIndicators:
     """Collection of technical indicators for trading strategies"""

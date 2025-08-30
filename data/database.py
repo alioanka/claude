@@ -5,7 +5,7 @@ Database models and manager for the crypto trading bot.
 import asyncio
 import asyncpg
 import aiosqlite
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from sqlalchemy import (
     Column, String, Float, DateTime, Integer, Text, Boolean, 
