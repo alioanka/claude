@@ -180,7 +180,7 @@ class Signal(Base):
     price = Column(Float, nullable=False)
     timestamp = Column(DateTime, default=datetime.utcnow)
     executed = Column(Boolean, default=False)
-    metadata = Column(Text)  # JSON string for additional data
+    signal_metadata = Column(Text)  # JSON string for additional data
     
     def __repr__(self):
         return f"<Signal(symbol='{self.symbol}', type='{self.signal_type}', confidence={self.confidence})>"
@@ -195,7 +195,7 @@ class Signal(Base):
             'price': self.price,
             'timestamp': self.timestamp.isoformat() if self.timestamp else None,
             'executed': self.executed,
-            'metadata': self.metadata
+            'signal_metadata': self.signal_metadata
         }
 
 class DatabaseManager:
@@ -216,13 +216,13 @@ class DatabaseManager:
                 self.session_factory = sessionmaker(bind=self.engine)
                 
                 # Create tables
-                Base.metadata.create_all(self.engine)
+                Base.signal_metadata.create_all(self.engine)
                 logger.info("PostgreSQL database initialized successfully")
             else:
                 # SQLite setup for development
                 self.engine = create_engine(self.database_url)
                 self.session_factory = sessionmaker(bind=self.engine)
-                Base.metadata.create_all(self.engine)
+                Base.signal_metadata.create_all(self.engine)
                 logger.info("SQLite database initialized successfully")
                 
         except Exception as e:

@@ -1,16 +1,19 @@
-version: '3.8'
 services:
   trading-bot:
     build: .
     environment:
       - TRADING_MODE=paper
-      - DATABASE_URL=sqlite:///data/trading_bot.db
+      - DATABASE_URL=postgresql://trader:secure_password@postgres:5432/trading_bot
+      - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./storage:/app/storage
     ports:
       - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
     restart: unless-stopped
     
   postgres:
@@ -25,5 +28,14 @@ services:
     ports:
       - "5432:5432"
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  redis_data:
