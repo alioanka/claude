@@ -210,6 +210,30 @@ class NotificationManager:
                 
         except Exception as e:
             logger.error(f"❌ Notification send failed: {e}")
+
+# Add this method to your NotificationManager class in utils/notifications.py
+    # Insert it after the send_notification method (around line 150)
+    
+    async def send_error_message(self, message: str):
+        """Send error message - wrapper for send_error_notification"""
+        try:
+            # Use existing error notification infrastructure
+            error_info = {
+                'component': 'System',
+                'error': message,
+                'impact': 'Bot operation affected',
+                'error_number': 1
+            }
+            await self.send_error_notification(error_info)
+        except Exception as e:
+            logger.error(f"Failed to send error message: {e}")
+            # Fallback to direct notification
+            await self.send_notification(
+                f"ERROR: {message}", 
+                priority='critical', 
+                category='error', 
+                immediate=True
+            )
     
     async def send_immediate(self, notification: NotificationMessage):
         """Send notification immediately"""
