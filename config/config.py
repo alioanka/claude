@@ -45,7 +45,8 @@ class MLConfig:
 @dataclass
 class DatabaseConfig:
     """Database configuration settings"""
-    url: str = os.getenv("DATABASE_URL", "sqlite:///trading_bot.db")
+ #   url: str = os.getenv("DATABASE_URL", "sqlite:///trading_bot.db")
+    url: str = os.getenv("DATABASE_URL", "postgresql://trader:secure_password@postgres:5432/trading_bot")
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     
 @dataclass

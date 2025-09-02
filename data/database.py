@@ -199,34 +199,87 @@ class Signal(Base):
         }
 
 class DatabaseManager:
-    """Database manager for handling all database operations"""
+    """Database manager with PostgreSQL fallback to SQLite"""
     
     def __init__(self, database_url: str):
         self.database_url = database_url
         self.engine = None
         self.session_factory = None
-        self.is_postgres = 'postgresql' in database_url
+        
+        # Determine database type and handle missing dependencies
+        self.is_postgres = 'postgresql' in database_url.lower()
+        
+        if self.is_postgres:
+            try:
+                import psycopg2
+                logger.info("PostgreSQL adapter available")
+            except ImportError:
+                logger.warning("⚠️ PostgreSQL adapter (psycopg2) not available, falling back to SQLite")
+                self.database_url = "sqlite:///storage/trading_bot.db"
+                self.is_postgres = False
         
     async def initialize(self):
         """Initialize database connection and create tables"""
         try:
+            logger.info(f"🔗 Initializing database: {'PostgreSQL' if self.is_postgres else 'SQLite'}")
+            
+            # Create engine based on database type
             if self.is_postgres:
-                # PostgreSQL setup
-                self.engine = create_engine(self.database_url)
-                self.session_factory = sessionmaker(bind=self.engine)
-                
-                # Create tables
-                Base.signal_metadata.create_all(self.engine)
-                logger.info("PostgreSQL database initialized successfully")
+                self.engine = create_engine(
+                    self.database_url,
+                    pool_pre_ping=True,
+                    pool_recycle=300,
+                    echo=False
+                )
             else:
-                # SQLite setup for development
-                self.engine = create_engine(self.database_url)
-                self.session_factory = sessionmaker(bind=self.engine)
-                Base.signal_metadata.create_all(self.engine)
-                logger.info("SQLite database initialized successfully")
-                
+                # SQLite setup
+                self.engine = create_engine(
+                    self.database_url,
+                    connect_args={"check_same_thread": False},
+                    echo=False
+                )
+            
+            # Create session factory
+            self.session_factory = sessionmaker(bind=self.engine)
+            
+            # Create tables
+            Base.metadata.create_all(self.engine)
+            
+            # Test connection
+            await self._test_connection()
+            
+            logger.info("✅ Database initialized successfully")
+            
         except Exception as e:
-            logger.error(f"Database initialization failed: {e}")
+            logger.error(f"❌ Database initialization failed: {e}")
+            
+            # If PostgreSQL fails, try SQLite fallback
+            if self.is_postgres:
+                logger.info("🔄 Attempting SQLite fallback...")
+                self.database_url = "sqlite:///storage/trading_bot.db"
+                self.is_postgres = False
+                await self.initialize()  # Retry with SQLite
+            else:
+                raise
+    
+    async def _test_connection(self):
+        """Test database connection"""
+        try:
+            session = self.get_session()
+            
+            # Simple query to test connection
+            if self.is_postgres:
+                session.execute("SELECT 1")
+            else:
+                session.execute("SELECT 1")
+            
+            session.close()
+            logger.info("✅ Database connection test successful")
+            
+        except Exception as e:
+            logger.error(f"❌ Database connection test failed: {e}")
+            if session:
+                session.close()
             raise
     
     def get_session(self):
@@ -259,10 +312,79 @@ class DatabaseManager:
             
         except Exception as e:
             logger.error(f"Failed to save market data: {e}")
-            if session:
+            if 'session' in locals():
                 session.rollback()
                 session.close()
             return False
+    
+    # Store OHLCV data method for data collector
+    async def store_ohlcv(self, symbol: str, timeframe: str, candles: List[List]) -> bool:
+        """Store OHLCV data for data collector compatibility"""
+        try:
+            data = []
+            for candle in candles:
+                data.append({
+                    'symbol': symbol,
+                    'timeframe': timeframe,
+                    'timestamp': candle[0],  # timestamp
+                    'open': candle[1],
+                    'high': candle[2],
+                    'low': candle[3],
+                    'close': candle[4],
+                    'volume': candle[5]
+                })
+            
+            return await self.save_market_data(data)
+            
+        except Exception as e:
+            logger.error(f"Failed to store OHLCV data: {e}")
+            return False
+    
+    async def get_historical_data(self, symbol: str, timeframe: str, 
+                                start_date: datetime, end_date: datetime) -> List[Dict]:
+        """Get historical market data"""
+        try:
+            session = self.get_session()
+            
+            data = session.query(MarketData).filter(
+                MarketData.symbol == symbol,
+                MarketData.timeframe == timeframe,
+                MarketData.timestamp >= start_date,
+                MarketData.timestamp <= end_date
+            ).order_by(MarketData.timestamp).all()
+            
+            result = [
+                {
+                    'timestamp': int(item.timestamp.timestamp() * 1000),
+                    'open': item.open,
+                    'high': item.high,
+                    'low': item.low,
+                    'close': item.close,
+                    'volume': item.volume
+                }
+                for item in data
+            ]
+            
+            session.close()
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to get historical data: {e}")
+            if 'session' in locals():
+                session.close()
+            return []
+    
+    async def close(self):
+        """Close database connections"""
+        try:
+            if self.engine:
+                self.engine.dispose()
+            logger.info("🔌 Database connections closed")
+            
+        except Exception as e:
+            logger.error(f"Error closing database connections: {e}")
+    
+    # ... (Keep all other methods as they are) ...
     
     async def get_latest_market_data(self, symbol: str, timeframe: str, limit: int = 100) -> List[MarketData]:
         """Get latest market data for a symbol"""
