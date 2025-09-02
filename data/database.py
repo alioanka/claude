@@ -3,8 +3,7 @@ Database models and manager for the crypto trading bot.
 """
 
 import asyncio
-import asyncpg
-import aiosqlite
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from sqlalchemy import (
@@ -15,7 +14,6 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -199,40 +197,58 @@ class Signal(Base):
         }
 
 class DatabaseManager:
-    """Database manager with PostgreSQL fallback to SQLite"""
+    """Database manager with PostgreSQL support and SQLite fallback"""
     
     def __init__(self, database_url: str):
         self.database_url = database_url
         self.engine = None
         self.session_factory = None
+        self.is_postgres = False
+        self._check_dependencies()
         
-        # Determine database type and handle missing dependencies
-        self.is_postgres = 'postgresql' in database_url.lower()
-        
-        if self.is_postgres:
-            try:
+    def _check_dependencies(self):
+        """Check if PostgreSQL dependencies are available"""
+        try:
+            if 'postgresql' in self.database_url.lower():
                 import psycopg2
-                logger.info("PostgreSQL adapter available")
-            except ImportError:
-                logger.warning("⚠️ PostgreSQL adapter (psycopg2) not available, falling back to SQLite")
+                self.is_postgres = True
+                logger.info("PostgreSQL adapter (psycopg2) available")
+        except ImportError:
+            if 'postgresql' in self.database_url.lower():
+                logger.error("PostgreSQL adapter (psycopg2) not available but PostgreSQL URL provided")
+                logger.info("Falling back to SQLite")
                 self.database_url = "sqlite:///storage/trading_bot.db"
                 self.is_postgres = False
         
     async def initialize(self):
         """Initialize database connection and create tables"""
         try:
-            logger.info(f"🔗 Initializing database: {'PostgreSQL' if self.is_postgres else 'SQLite'}")
+            logger.info(f"Initializing database: {'PostgreSQL' if self.is_postgres else 'SQLite'}")
             
             # Create engine based on database type
             if self.is_postgres:
-                self.engine = create_engine(
-                    self.database_url,
-                    pool_pre_ping=True,
-                    pool_recycle=300,
-                    echo=False
-                )
+                try:
+                    self.engine = create_engine(
+                        self.database_url,
+                        pool_pre_ping=True,
+                        pool_recycle=300,
+                        echo=False
+                    )
+                except Exception as e:
+                    logger.error(f"PostgreSQL connection failed: {e}")
+                    logger.info("Falling back to SQLite")
+                    self.database_url = "sqlite:///storage/trading_bot.db"
+                    self.is_postgres = False
+                    self.engine = create_engine(
+                        self.database_url,
+                        connect_args={"check_same_thread": False},
+                        echo=False
+                    )
             else:
-                # SQLite setup
+                # Ensure storage directory exists
+                import os
+                os.makedirs('storage', exist_ok=True)
+                
                 self.engine = create_engine(
                     self.database_url,
                     connect_args={"check_same_thread": False},
@@ -248,36 +264,25 @@ class DatabaseManager:
             # Test connection
             await self._test_connection()
             
-            logger.info("✅ Database initialized successfully")
+            logger.info("Database initialized successfully")
             
         except Exception as e:
-            logger.error(f"❌ Database initialization failed: {e}")
-            
-            # If PostgreSQL fails, try SQLite fallback
-            if self.is_postgres:
-                logger.info("🔄 Attempting SQLite fallback...")
-                self.database_url = "sqlite:///storage/trading_bot.db"
-                self.is_postgres = False
-                await self.initialize()  # Retry with SQLite
-            else:
-                raise
+            logger.error(f"Database initialization failed: {e}")
+            raise
     
     async def _test_connection(self):
         """Test database connection"""
+        session = None
         try:
             session = self.get_session()
             
             # Simple query to test connection
-            if self.is_postgres:
-                session.execute("SELECT 1")
-            else:
-                session.execute("SELECT 1")
-            
+            session.execute("SELECT 1")
             session.close()
-            logger.info("✅ Database connection test successful")
+            logger.info("Database connection test successful")
             
         except Exception as e:
-            logger.error(f"❌ Database connection test failed: {e}")
+            logger.error(f"Database connection test failed: {e}")
             if session:
                 session.close()
             raise
@@ -290,6 +295,7 @@ class DatabaseManager:
     
     async def save_market_data(self, data: List[Dict[str, Any]]) -> bool:
         """Save market data to database"""
+        session = None
         try:
             session = self.get_session()
             
@@ -312,7 +318,7 @@ class DatabaseManager:
             
         except Exception as e:
             logger.error(f"Failed to save market data: {e}")
-            if 'session' in locals():
+            if session:
                 session.rollback()
                 session.close()
             return False
@@ -343,6 +349,7 @@ class DatabaseManager:
     async def get_historical_data(self, symbol: str, timeframe: str, 
                                 start_date: datetime, end_date: datetime) -> List[Dict]:
         """Get historical market data"""
+        session = None
         try:
             session = self.get_session()
             
@@ -370,7 +377,7 @@ class DatabaseManager:
             
         except Exception as e:
             logger.error(f"Failed to get historical data: {e}")
-            if 'session' in locals():
+            if session:
                 session.close()
             return []
     
@@ -379,15 +386,15 @@ class DatabaseManager:
         try:
             if self.engine:
                 self.engine.dispose()
-            logger.info("🔌 Database connections closed")
+            logger.info("Database connections closed")
             
         except Exception as e:
             logger.error(f"Error closing database connections: {e}")
     
-    # ... (Keep all other methods as they are) ...
-    
+    # Keep all other methods as they are...
     async def get_latest_market_data(self, symbol: str, timeframe: str, limit: int = 100) -> List[MarketData]:
         """Get latest market data for a symbol"""
+        session = None
         try:
             session = self.get_session()
             

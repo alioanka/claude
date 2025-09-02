@@ -3,7 +3,7 @@ Exchange Manager - Handles all exchange interactions
 Supports both paper trading and live trading modes.
 """
 
-import ccxt
+import ccxt.async_support as ccxt
 import asyncio
 import logging
 from typing import Dict, List, Optional, Any, Tuple
@@ -28,8 +28,8 @@ class PaperTradingEngine:
         self.order_id_counter = 1
         self.trade_history: List[Dict] = []
         
-        # Paper trading settings
-        self.slippage = float(config.trading.initial_capital) * 0.001  # 0.1% slippage
+        # Paper trading settings - Fixed the slippage calculation
+        self.slippage = 0.001  # 0.1% slippage
         self.commission = 0.001  # 0.1% commission
         
     async def create_order(self, symbol: str, side: str, amount: float, 
@@ -83,18 +83,16 @@ class PaperTradingEngine:
             self.orders[order_id] = order
             self.trade_history.append(order)
             
-            logger.info(f"📝 Paper order executed: {symbol} {side} {amount} @ {execution_price:.4f}")
+            logger.info(f"Paper order executed: {symbol} {side} {amount} @ {execution_price:.4f}")
             
             return order
             
         except Exception as e:
-            logger.error(f"❌ Paper order failed: {e}")
+            logger.error(f"Paper order failed: {e}")
             raise
     
     async def get_market_price(self, symbol: str) -> Optional[float]:
-        """Get current market price (would be replaced with real data)"""
-        # This is a simplified version - in reality, we'd get this from DataCollector
-        # For now, return a mock price
+        """Get current market price (mock prices for paper trading)"""
         mock_prices = {
             'BTCUSDT': 45000.0,
             'ETHUSDT': 3000.0,
@@ -178,7 +176,7 @@ class ExchangeManager:
     async def initialize(self):
         """Initialize exchange connection"""
         try:
-            logger.info(f"🔗 Initializing exchange connection (Mode: {config.trading.mode})...")
+            logger.info(f"Initializing exchange connection (Mode: {config.trading.mode})...")
             
             if self.is_paper_trading:
                 await self.initialize_paper_trading()
@@ -188,10 +186,10 @@ class ExchangeManager:
             # Load exchange info
             await self.load_exchange_info()
             
-            logger.info("✅ Exchange connection initialized successfully!")
+            logger.info("Exchange connection initialized successfully!")
             
         except Exception as e:
-            logger.error(f"❌ Exchange initialization failed: {e}")
+            logger.error(f"Exchange initialization failed: {e}")
             raise
     
     async def initialize_paper_trading(self):
@@ -225,92 +223,69 @@ class ExchangeManager:
         await self.verify_trading_permissions()
     
     async def test_connection(self):
-            """Test exchange connection with proper async/await handling"""
-            try:
-                async with self.rate_limiter:
-                    # Load markets with proper async handling
+        """Test exchange connection with proper async/await handling"""
+        try:
+            async with self.rate_limiter:
+                # Load markets with proper async handling
+                try:
+                    markets = await self.exchange.load_markets()
+                    logger.info(f"Markets loaded: {len(markets)} pairs")
+                except Exception as load_error:
+                    logger.warning(f"Markets loading failed: {load_error}")
+                
+                # Test connection differently for paper vs live trading
+                if self.is_paper_trading:
+                    logger.info("Paper trading mode connection successful")
+                else:
+                    # For live trading, test with a simple API call
                     try:
-                        # For ccxt exchanges, load_markets can be sync or async
-                        if hasattr(self.exchange, 'load_markets'):
-                            # Try to detect if it's async by checking if it returns a coroutine
-                            markets_result = self.exchange.load_markets()
-                            if asyncio.iscoroutine(markets_result):
-                                await markets_result
-                            # If it's not a coroutine, it already executed synchronously
-                    except Exception as load_error:
-                        logger.warning(f"Markets loading failed: {load_error}")
-                        # Continue with connection test even if markets loading fails
-                    
-                    # Test connection differently for paper vs live trading
-                    if self.is_paper_trading:
-                        # For paper trading, just ensure we can create the mock engine
-                        logger.info("✅ Paper trading mode connection successful")
-                    else:
-                        # For live trading, test with a simple API call
-                        try:
-                            # Use fetch_status which is less sensitive than balance queries
-                            if hasattr(self.exchange, 'fetch_status'):
-                                status_result = self.exchange.fetch_status()
-                                if asyncio.iscoroutine(status_result):
-                                    status = await status_result
-                                else:
-                                    status = status_result
-                                logger.info("✅ Exchange connection successful")
-                            else:
-                                # Fallback: test with ticker data
-                                ticker_result = self.exchange.fetch_ticker('BTCUSDT')
-                                if asyncio.iscoroutine(ticker_result):
-                                    ticker = await ticker_result
-                                else:
-                                    ticker = ticker_result
-                                logger.info(f"✅ Exchange connection successful. BTC: ${ticker.get('last', 0):.2f}")
-                        except Exception as api_error:
-                            # If specific API calls fail, but we got this far, connection might be OK
-                            logger.warning(f"API test failed but connection may be OK: {api_error}")
-                            logger.info("✅ Exchange connection established (limited API access)")
-                            
-            except Exception as e:
-                logger.error(f"❌ Exchange connection test failed: {e}")
-                raise
+                        if hasattr(self.exchange, 'fetch_status'):
+                            status = await self.exchange.fetch_status()
+                            logger.info("Exchange connection successful")
+                        else:
+                            # Fallback: test with ticker data
+                            ticker = await self.exchange.fetch_ticker('BTCUSDT')
+                            logger.info(f"Exchange connection successful. BTC: ${ticker.get('last', 0):.2f}")
+                    except Exception as api_error:
+                        logger.warning(f"API test failed: {api_error}")
+                        logger.info("Exchange connection established (limited API access)")
+                        
+        except Exception as e:
+            logger.error(f"Exchange connection test failed: {e}")
+            raise
     
     async def verify_trading_permissions(self):
-            """Verify that API keys have trading permissions"""
+        """Verify that API keys have trading permissions"""
+        try:
+            if self.is_paper_trading:
+                logger.info("Paper trading - skipping permissions check")
+                return
+            
+            # For live trading, check account info instead of creating test orders
             try:
-                if self.is_paper_trading:
-                    logger.info("✅ Paper trading - skipping permissions check")
-                    return
-                
-                # For live trading, check account info instead of creating test orders
-                try:
-                    async with self.rate_limiter:
-                        # Try to fetch account information (requires trading permissions)
-                        account_result = self.exchange.fetch_balance()
-                        if asyncio.iscoroutine(account_result):
-                            account = await account_result
-                        else:
-                            account = account_result
-                        
-                        logger.info("✅ Trading permissions verified")
-                        
-                except Exception as e:
-                    error_msg = str(e).lower()
-                    if 'permission' in error_msg or 'authorized' in error_msg or 'forbidden' in error_msg:
-                        raise Exception(f"Trading permissions denied: {e}")
-                    else:
-                        # Other errors might be temporary, so just warn
-                        logger.warning(f"Could not verify trading permissions: {e}")
-                        logger.info("✅ Trading permissions check skipped due to API limitations")
-                        
+                async with self.rate_limiter:
+                    account = await self.exchange.fetch_balance()
+                    logger.info("Trading permissions verified")
+                    
             except Exception as e:
-                logger.error(f"❌ Trading permissions verification failed: {e}")
-                if not self.is_paper_trading:
-                    raise
+                error_msg = str(e).lower()
+                if 'permission' in error_msg or 'authorized' in error_msg or 'forbidden' in error_msg:
+                    raise Exception(f"Trading permissions denied: {e}")
+                else:
+                    # Other errors might be temporary, so just warn
+                    logger.warning(f"Could not verify trading permissions: {e}")
+                    logger.info("Trading permissions check skipped due to API limitations")
+                    
+        except Exception as e:
+            logger.error(f"Trading permissions verification failed: {e}")
+            if not self.is_paper_trading:
+                raise
     
     async def load_exchange_info(self):
         """Load exchange information and trading rules"""
         try:
-            # Fix: Remove await from load_markets() call
-            markets = self.exchange.load_markets()  # This is sync, not async
+            # Fixed: Properly await the load_markets call
+            markets = await self.exchange.load_markets()
             
             self.exchange_info = {}
             
@@ -326,42 +301,10 @@ class ExchangeManager:
                         'step_size': market.get('info', {}).get('stepSize', '0.001')
                     }
             
-            logger.info(f"📋 Loaded exchange info for {len(self.exchange_info)} trading pairs")
+            logger.info(f"Loaded exchange info for {len(self.exchange_info)} trading pairs")
             
         except Exception as e:
-            logger.error(f"❌ Failed to load exchange info: {e}")
-
-    async def test_connection(self):
-        """Test exchange connection with proper async/await handling"""
-        try:
-            async with self.rate_limiter:
-                # Fix: load_markets is synchronous
-                try:
-                    markets = self.exchange.load_markets()  # Remove await
-                    logger.info(f"✅ Markets loaded: {len(markets)} pairs")
-                except Exception as load_error:
-                    logger.warning(f"Markets loading failed: {load_error}")
-                
-                # Test connection differently for paper vs live trading
-                if self.is_paper_trading:
-                    logger.info("✅ Paper trading mode connection successful")
-                else:
-                    # For live trading, test with a simple API call
-                    try:
-                        if hasattr(self.exchange, 'fetch_status'):
-                            status = self.exchange.fetch_status()  # Usually sync
-                            logger.info("✅ Exchange connection successful")
-                        else:
-                            # Fallback: test with ticker data
-                            ticker = self.exchange.fetch_ticker('BTCUSDT')  # Usually sync
-                            logger.info(f"✅ Exchange connection successful. BTC: ${ticker.get('last', 0):.2f}")
-                    except Exception as api_error:
-                        logger.warning(f"API test failed: {api_error}")
-                        logger.info("✅ Exchange connection established (limited API access)")
-                        
-        except Exception as e:
-            logger.error(f"❌ Exchange connection test failed: {e}")
-            raise
+            logger.error(f"Failed to load exchange info: {e}")
     
     async def create_order(self, symbol: str, side: str, amount: float, 
                           price: Optional[float] = None, order_type: str = 'market',
@@ -384,7 +327,7 @@ class ExchangeManager:
                 )
                 
         except Exception as e:
-            logger.error(f"❌ Order creation failed: {symbol} {side} {amount} - {e}")
+            logger.error(f"Order creation failed: {symbol} {side} {amount} - {e}")
             raise
     
     async def create_live_order(self, symbol: str, side: str, amount: float,
@@ -411,7 +354,7 @@ class ExchangeManager:
                             }
                         )
                     except Exception as e:
-                        logger.warning(f"⚠️ Failed to create stop loss: {e}")
+                        logger.warning(f"Failed to create stop loss: {e}")
                 
                 # Create take profit order if specified
                 if take_profit and order['status'] == 'closed':
@@ -421,13 +364,13 @@ class ExchangeManager:
                             symbol, tp_side, amount, take_profit
                         )
                     except Exception as e:
-                        logger.warning(f"⚠️ Failed to create take profit: {e}")
+                        logger.warning(f"Failed to create take profit: {e}")
                 
-                logger.info(f"✅ Live order created: {symbol} {side} {amount} @ {order.get('price', 'market')}")
+                logger.info(f"Live order created: {symbol} {side} {amount} @ {order.get('price', 'market')}")
                 return order
                 
         except Exception as e:
-            logger.error(f"❌ Live order creation failed: {e}")
+            logger.error(f"Live order creation failed: {e}")
             raise
     
     async def cancel_order(self, order_id: str, symbol: str) -> bool:
@@ -446,7 +389,7 @@ class ExchangeManager:
                     return result['status'] == 'canceled'
                     
         except Exception as e:
-            logger.error(f"❌ Order cancellation failed: {order_id} - {e}")
+            logger.error(f"Order cancellation failed: {order_id} - {e}")
             return False
     
     async def get_order_status(self, order_id: str, symbol: str) -> Optional[Dict]:
@@ -459,7 +402,7 @@ class ExchangeManager:
                     return await self.exchange.fetch_order(order_id, symbol)
                     
         except Exception as e:
-            logger.error(f"❌ Failed to get order status: {order_id} - {e}")
+            logger.error(f"Failed to get order status: {order_id} - {e}")
             return None
     
     async def get_balance(self) -> Dict[str, float]:
@@ -476,7 +419,7 @@ class ExchangeManager:
                     }
                     
         except Exception as e:
-            logger.error(f"❌ Failed to get balance: {e}")
+            logger.error(f"Failed to get balance: {e}")
             return {'USDT': 0, 'total': 0}
     
     async def get_positions(self) -> List[Dict]:
@@ -505,7 +448,7 @@ class ExchangeManager:
                     return active_positions
                     
         except Exception as e:
-            logger.error(f"❌ Failed to get positions: {e}")
+            logger.error(f"Failed to get positions: {e}")
             return []
     
     async def get_current_price(self, symbol: str) -> Optional[float]:
@@ -519,7 +462,7 @@ class ExchangeManager:
                     return ticker.get('last')
                     
         except Exception as e:
-            logger.error(f"❌ Failed to get current price for {symbol}: {e}")
+            logger.error(f"Failed to get current price for {symbol}: {e}")
             return None
     
     async def get_order_book(self, symbol: str, limit: int = 100) -> Optional[Dict]:
@@ -530,7 +473,7 @@ class ExchangeManager:
                 return order_book
                 
         except Exception as e:
-            logger.error(f"❌ Failed to get order book for {symbol}: {e}")
+            logger.error(f"Failed to get order book for {symbol}: {e}")
             return None
     
     async def get_recent_trades(self, symbol: str, limit: int = 100) -> List[Dict]:
@@ -541,7 +484,7 @@ class ExchangeManager:
                 return trades
                 
         except Exception as e:
-            logger.error(f"❌ Failed to get recent trades for {symbol}: {e}")
+            logger.error(f"Failed to get recent trades for {symbol}: {e}")
             return []
     
     async def get_ohlcv(self, symbol: str, timeframe: str = '1m', 
@@ -555,7 +498,7 @@ class ExchangeManager:
                 return candles
                 
         except Exception as e:
-            logger.error(f"❌ Failed to get OHLCV for {symbol}: {e}")
+            logger.error(f"Failed to get OHLCV for {symbol}: {e}")
             return []
     
     def adjust_amount(self, symbol: str, amount: float) -> float:
@@ -577,7 +520,7 @@ class ExchangeManager:
             return max(adjusted, min_amount)
             
         except Exception as e:
-            logger.warning(f"⚠️ Amount adjustment failed for {symbol}: {e}")
+            logger.warning(f"Amount adjustment failed for {symbol}: {e}")
             return amount
     
     def adjust_price(self, symbol: str, price: float) -> float:
@@ -597,7 +540,7 @@ class ExchangeManager:
             return adjusted
             
         except Exception as e:
-            logger.warning(f"⚠️ Price adjustment failed for {symbol}: {e}")
+            logger.warning(f"Price adjustment failed for {symbol}: {e}")
             return price
     
     async def close_position(self, symbol: str) -> bool:
@@ -616,7 +559,7 @@ class ExchangeManager:
             return False
             
         except Exception as e:
-            logger.error(f"❌ Failed to close position for {symbol}: {e}")
+            logger.error(f"Failed to close position for {symbol}: {e}")
             return False
     
     async def get_trading_fees(self, symbol: str) -> Dict[str, float]:
@@ -630,7 +573,7 @@ class ExchangeManager:
                 return {'maker': 0.001, 'taker': 0.001}
                 
         except Exception as e:
-            logger.warning(f"⚠️ Failed to get trading fees for {symbol}: {e}")
+            logger.warning(f"Failed to get trading fees for {symbol}: {e}")
             return {'maker': 0.001, 'taker': 0.001}
     
     async def get_funding_rate(self, symbol: str) -> Optional[float]:
@@ -643,7 +586,7 @@ class ExchangeManager:
             return None
             
         except Exception as e:
-            logger.warning(f"⚠️ Failed to get funding rate for {symbol}: {e}")
+            logger.warning(f"Failed to get funding rate for {symbol}: {e}")
             return None
     
     async def get_market_status(self) -> Dict[str, Any]:
@@ -667,7 +610,7 @@ class ExchangeManager:
             return status
             
         except Exception as e:
-            logger.error(f"❌ Failed to get market status: {e}")
+            logger.error(f"Failed to get market status: {e}")
             return {'exchange_status': 'unknown', 'trading_enabled': False}
     
     async def close(self):
@@ -676,10 +619,10 @@ class ExchangeManager:
             if self.exchange and hasattr(self.exchange, 'close'):
                 await self.exchange.close()
             
-            logger.info("🔌 Exchange connections closed")
+            logger.info("Exchange connections closed")
             
         except Exception as e:
-            logger.error(f"❌ Error closing exchange connections: {e}")
+            logger.error(f"Error closing exchange connections: {e}")
     
     def get_exchange_info(self, symbol: str) -> Dict[str, Any]:
         """Get exchange information for a symbol"""
@@ -710,7 +653,7 @@ class ExchangeManager:
                     }
                     
         except Exception as e:
-            logger.error(f"❌ Failed to get account info: {e}")
+            logger.error(f"Failed to get account info: {e}")
             return {'account_type': 'unknown'}
     
     async def health_check(self) -> bool:
@@ -721,5 +664,5 @@ class ExchangeManager:
             return True
             
         except Exception as e:
-            logger.error(f"❌ Exchange health check failed: {e}")
+            logger.error(f"Exchange health check failed: {e}")
             return False

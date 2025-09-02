@@ -2,7 +2,7 @@
 
 # Database Configuration
 database:
-  host: "trading-postgres"  # Docker service name
+  host: "postgres"  # Docker service name
   port: 5432
   username: "trading_user"
   password: "trading_pass"
@@ -10,7 +10,7 @@ database:
   
 # Redis Configuration
 redis:
-  host: "trading-redis"  # Docker service name
+  host: "redis"  # Docker service name
   port: 6379
   password: ""
   db: 0

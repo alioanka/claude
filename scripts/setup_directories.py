@@ -1,65 +1,69 @@
 #!/usr/bin/env python3
 """
-Setup script to create necessary directories and __init__.py files.
-Run this before starting the trading bot to ensure all packages are properly initialized.
+Setup script to create necessary directories for the trading bot.
 """
 
 import os
-from pathlib import Path
+import logging
 
-def create_directory_structure():
-    """Create necessary directories and __init__.py files."""
-    
-    # Directories to create
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def create_directories():
+    """Create all necessary directories for the trading bot."""
     directories = [
-        "config",
-        "core", 
-        "data",
-        "ml",
-        "risk",
-        "strategies", 
-        "utils",
-        "monitoring",
-        "scripts",
-        "tests",
-        "logs",
-        "storage/historical",
-        "storage/models",
-        "storage/backups",
-        "storage/exports"
+        'logs',
+        'storage',
+        'storage/historical',
+        'storage/models',
+        'storage/backups',
+        'storage/exports',
+        'storage/performance',
+        'ml',
+        'ml/models',
+        'data',
+        'data/cache',
+        'config'
     ]
     
-    # Create directories
+    created_count = 0
+    
     for directory in directories:
-        Path(directory).mkdir(parents=True, exist_ok=True)
-        print(f"Created directory: {directory}")
+        try:
+            if not os.path.exists(directory):
+                os.makedirs(directory, exist_ok=True)
+                logger.info(f"Created directory: {directory}")
+                created_count += 1
+            else:
+                logger.debug(f"Directory already exists: {directory}")
+        except Exception as e:
+            logger.error(f"Failed to create directory {directory}: {e}")
     
-    # Create __init__.py files for Python packages
-    python_packages = [
-        "core",
-        "data", 
-        "ml",
-        "risk",
-        "strategies",
-        "utils",
-        "monitoring",
-        "scripts",
-        "tests"
+    logger.info(f"Directory setup complete. Created {created_count} new directories.")
+    
+    # Create empty __init__.py files for Python packages
+    package_dirs = [
+        'ml',
+        'data',
+        'config',
+        'core',
+        'strategies',
+        'risk',
+        'utils',
+        'monitoring'
     ]
     
-    for package in python_packages:
-        init_file = Path(package) / "__init__.py"
-        if not init_file.exists():
-            init_file.write_text('"""Package initialization file."""\n')
-            print(f"Created __init__.py in {package}")
-    
-    # Create root __init__.py
-    root_init = Path("__init__.py")
-    if not root_init.exists():
-        root_init.write_text('"""Trading Bot Application Package"""\n')
-        print("Created root __init__.py")
-    
-    print("Directory structure setup complete!")
+    for pkg_dir in package_dirs:
+        init_file = os.path.join(pkg_dir, '__init__.py')
+        if not os.path.exists(init_file):
+            try:
+                os.makedirs(pkg_dir, exist_ok=True)
+                with open(init_file, 'w') as f:
+                    f.write('"""Package initialization file."""\n')
+                logger.info(f"Created package init file: {init_file}")
+            except Exception as e:
+                logger.error(f"Failed to create init file {init_file}: {e}")
 
 if __name__ == "__main__":
-    create_directory_structure()
+    create_directories()
