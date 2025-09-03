@@ -130,7 +130,33 @@ class MLStrategy(BaseStrategy):
         except Exception as e:
             logger.error(f"ML signal generation failed for {symbol}: {e}")
             return None
-    
+
+    def get_required_data(self) -> Dict[str, Any]:
+        """
+        Minimal dataset requirements so the runner knows what to fetch/cache.
+        """
+        seq_len = self.lstm_config.get("sequence_length", 60)
+        return {
+            "timeframe": "1m",                 # keep in sync with your pipeline
+            "lookback": max(seq_len * 4, 240), # buffer for indicator/feature windows
+            "features": [
+                "open","high","low","close","volume"
+                # engineered features are created internally in _engineer_features()
+            ],
+        }
+
+    async def analyze(self, symbol: str, data: pd.DataFrame) -> List[Dict[str, Any]]:
+        """
+        Adapter required by BaseStrategy. Calls your generate_signal() and returns list.
+        """
+        try:
+            sig = await self.generate_signal(symbol, data)  # your existing method
+            return [sig] if sig else []
+        except Exception as e:
+            logger.exception(f"[MLStrategy] analyze() failed for {symbol}: {e}")
+            return []
+
+
     async def _engineer_features(self, data: pd.DataFrame) -> pd.DataFrame:
         """Engineer features for ML models"""
         try:

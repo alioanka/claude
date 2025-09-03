@@ -275,7 +275,10 @@ class DashboardManager:
             </div>
             
             <script>
-                const ws = new WebSocket('ws://localhost:8000/ws');
+                const ws = new WebSocket(
+                    (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws'
+                );
+
                 let portfolioChart;
                 
                 ws.onmessage = function(event) {

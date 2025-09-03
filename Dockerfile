@@ -27,7 +27,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p logs storage data ml/models storage/historical storage/models storage/backups storage/exports storage/performance
+RUN mkdir -p logs storage data storage/historical storage/models storage/backups storage/exports storage/performance
 
 # Set environment variables
 ENV PYTHONPATH=/app

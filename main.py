@@ -403,8 +403,7 @@ if __name__ == "__main__":
         'storage/models',
         'storage/backups',
         'storage/exports',
-        'storage/performance',
-        'ml/models'
+        'storage/performance'
     ]
     
     for directory in required_dirs:

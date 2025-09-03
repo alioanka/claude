@@ -604,17 +604,41 @@ class ExchangeManager:
             return {'maker': 0.001, 'taker': 0.001}
     
     async def get_funding_rate(self, symbol: str) -> Optional[float]:
-        """Get current funding rate for futures"""
+        """Return the current funding rate, but ONLY for derivatives (swap/futures) symbols."""
         try:
-            if hasattr(self.exchange, 'fetch_funding_rate'):
-                async with self.rate_limiter:
-                    funding_rate = await self.exchange.fetch_funding_rate(symbol)
-                    return funding_rate.get('fundingRate')
-            return None
-            
+            # Not all exchanges implement this; bail out early if missing.
+            if not hasattr(self.exchange, "fetch_funding_rate"):
+                return None
+
+            # Normalize e.g. BTCUSDT -> BTC/USDT for ccxt lookups
+            ex_symbol = self._to_exchange_symbol(symbol)
+
+            async with self.rate_limiter:
+                # Ensure markets are loaded so we can inspect symbol type
+                markets = getattr(self.exchange, "markets", None) or await self.exchange.load_markets()
+                market = markets.get(ex_symbol) or markets.get(symbol)
+                if not market:
+                    # Unknown market — play it safe and skip
+                    return None
+
+                # Only proceed for derivatives (swap, future, contract).
+                is_derivative = bool(
+                    market.get("swap") or market.get("future") or market.get("contract")
+                )
+                if not is_derivative:
+                    # Spot market: funding does not apply
+                    return None
+
+                # Safe to fetch funding rate
+                fr = await self.exchange.fetch_funding_rate(ex_symbol)
+                rate = fr.get("fundingRate")
+                return float(rate) if rate is not None else None
+
         except Exception as e:
-            logger.warning(f"Failed to get funding rate for {symbol}: {e}")
+            # Treat failures as "no rate" instead of warning spam
+            logger.debug(f"get_funding_rate skipped for {symbol}: {e}")
             return None
+
     
     async def get_market_status(self) -> Dict[str, Any]:
         """Get overall market status"""

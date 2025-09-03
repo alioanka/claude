@@ -102,7 +102,35 @@ class ArbitrageStrategy(BaseStrategy):
         except Exception as e:
             logger.error(f"Arbitrage signal generation failed for {symbol}: {e}")
             return None
-    
+
+    def get_required_data(self) -> Dict[str, Any]:
+        """
+        Describe the minimal data requirements for this strategy.
+        Called by the framework before analyze(). Keep this aligned with your config.
+        """
+        lookback = getattr(self.arb_config, "lookback_period", 100)
+        return {
+            "timeframe": "1m",           # or pull from self.config if you keep it there
+            "lookback": max(lookback, 100),
+            # if you drive symbols from config, expose that here:
+            "symbols": self.config.get("symbols", []),
+            "notes": "Pairs/stat-arb will request additional symbols internally"
+        }
+
+    async def analyze(self, symbol: str, data: pd.DataFrame) -> List[Dict[str, Any]]:
+        """
+        Adapter to the framework's abstract method.
+        Leverages this class's existing generate_signal() to produce normalized output.
+        Must return a LIST of signal dicts per the BaseStrategy contract.
+        """
+        try:
+            sig = await self.generate_signal(symbol, data)  # your existing method
+            return [sig] if sig else []
+        except Exception as e:
+            logger.exception(f"[ArbitrageStrategy] analyze() failed for {symbol}: {e}")
+            return []
+
+
     async def _check_cross_exchange_arbitrage(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Check for arbitrage opportunities across exchanges"""
         try:
