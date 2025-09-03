@@ -46,6 +46,11 @@ class DashboardManager:
             """Get dashboard HTML"""
             return await self.get_dashboard_html()
         
+        @self.app.get("/", response_class=HTMLResponse)
+        async def root():
+            return await self.get_dashboard_html()
+
+        
         @self.app.get("/api/positions")
         async def get_positions():
             """Get current positions"""
@@ -403,12 +408,10 @@ class DashboardManager:
         """
     
     async def start_dashboard(self, host: str = "0.0.0.0", port: int = 8000):
-        """Start the dashboard server"""
+        """Start the dashboard server (async, non-blocking)"""
         import uvicorn
+        from uvicorn import Config, Server
         logger.info(f"Starting dashboard on {host}:{port}")
-        await uvicorn.run(
-            self.app, 
-            host=host, 
-            port=port,
-            log_level="info"
-        )
+        config = Config(app=self.app, host=host, port=port, log_level="info", loop="asyncio")
+        server = Server(config)
+        await server.serve()

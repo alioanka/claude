@@ -45,53 +45,58 @@ class RiskManager:
         self.total_signals_checked = 0
     
     async def validate_signal(self, signal) -> bool:
-        """Validate trading signal against risk rules"""
+        """Validate trading signal against risk rules (pre-sizing)"""
         try:
             self.total_signals_checked += 1
-            
-            # Check if portfolio manager is available
+
+            # Portfolio context
             if not self.portfolio_manager:
                 logger.warning("⚠️ No portfolio manager available for risk check")
-                return True  # Allow trade if no risk manager
-            
-            # Get current portfolio state
+                return True
+
             total_balance = self.portfolio_manager.get_total_balance()
             available_balance = self.portfolio_manager.get_available_balance()
-            
-            # Skip validation if no balance info
             if total_balance <= 0:
+                logger.debug("No total balance; allowing signal to proceed for sizing stage")
                 return True
-            
-            # Calculate position size if not provided
-            if not hasattr(signal, 'position_size') or not signal.position_size:
-                position_size = await self.calculate_position_size(signal, available_balance)
-                signal.position_size = position_size
-            else:
-                position_size = signal.position_size
-            
-            # Validation checks
-            validation_checks = [
-                self._check_minimum_position_size(position_size),
-                self._check_maximum_position_size(signal, total_balance),
-                self._check_available_balance(signal, available_balance),
-                await self._check_total_exposure(signal, total_balance),
-                await self._check_daily_loss_limit(),
-                await self._check_correlation_risk(signal)
-            ]
-            
-            # All checks must pass
-            all_passed = all(validation_checks)
-            
-            if not all_passed:
+
+            # Basic sanity on signal
+            if not hasattr(signal, 'symbol') or not signal.symbol:
+                return False
+            if not hasattr(signal, 'entry_price') or not signal.entry_price or signal.entry_price <= 0:
+                # Let TradeExecutor compute a realistic entry (e.g., from ticker) later
+                return True
+
+            # Position-count limit
+            if not self._check_position_limits():
                 self.blocked_signals += 1
-                logger.warning(f"🚫 Signal blocked by risk management: {signal.symbol}")
-            
-            return all_passed
-            
+                logger.warning(f"🚫 Signal blocked by risk management (max positions): {signal.symbol}")
+                return False
+
+            # Exposure (portfolio-wide) check (safe even without exact position_size)
+            if not await self._check_total_exposure(signal, total_balance):
+                self.blocked_signals += 1
+                logger.warning(f"🚫 Signal blocked by risk management (exposure): {signal.symbol}")
+                return False
+
+            # Correlation cluster control
+            if not await self._check_correlation(signal):
+                self.blocked_signals += 1
+                logger.warning(f"🚫 Signal blocked by risk management (correlation): {signal.symbol}")
+                return False
+
+            # Do NOT check available balance here unless both fields exist
+            if getattr(signal, 'position_size', None) and signal.entry_price:
+                if not self._check_available_balance(signal, available_balance):
+                    self.blocked_signals += 1
+                    logger.warning(f"🚫 Signal blocked by risk management (balance): {signal.symbol}")
+                    return False
+
+            return True
         except Exception as e:
             logger.error(f"❌ Risk validation error: {e}")
-            # In case of error, be conservative and block the trade
-            return False
+            return True
+
     
     def _check_minimum_position_size(self, position_size: float) -> bool:
         """Check minimum position size"""

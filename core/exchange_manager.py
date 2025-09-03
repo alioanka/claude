@@ -92,15 +92,30 @@ class PaperTradingEngine:
             raise
     
     async def get_market_price(self, symbol: str) -> Optional[float]:
-        """Get current market price (mock prices for paper trading)"""
+        """Get current market price from exchange; fallback to mock."""
+        try:
+            ex_symbol = self._to_exchange_symbol(symbol)
+            async with self.rate_limiter:
+                ticker = await self.exchange.fetch_ticker(ex_symbol)
+                # prefer 'last', fallback to bid/ask mid
+                price = ticker.get('last') or (
+                    (ticker.get('bid') or 0) + (ticker.get('ask') or 0)
+                ) / 2 or None
+                if price and price > 0:
+                    return float(price)
+        except Exception as e:
+            logger.debug(f"Price fetch failed for {symbol}: {e}")
+
+        # Fallback mock (kept for resilience)
         mock_prices = {
             'BTCUSDT': 45000.0,
             'ETHUSDT': 3000.0,
             'BNBUSDT': 400.0,
-            'ADAUSDT': 0.5,
+            'SOLUSDT': 100.0,
             'XRPUSDT': 0.6
         }
         return mock_prices.get(symbol)
+
     
     async def update_balances_and_positions(self, order: Dict):
         """Update paper trading balances and positions"""
@@ -191,7 +206,18 @@ class ExchangeManager:
         except Exception as e:
             logger.error(f"Exchange initialization failed: {e}")
             raise
-    
+
+    def _to_exchange_symbol(self, symbol: str) -> str:
+        """Normalize 'BTCUSDT' -> 'BTC/USDT' for ccxt if needed."""
+        if "/" in symbol:
+            return symbol
+        for q in ("USDT", "BUSD", "USD"):
+            if symbol.endswith(q):
+                base = symbol[:-len(q)]
+                return f"{base}/{q}"
+        return symbol
+
+
     async def initialize_paper_trading(self):
         """Initialize paper trading mode"""
         self.paper_engine = PaperTradingEngine(config.trading.initial_capital)
@@ -487,19 +513,20 @@ class ExchangeManager:
             logger.error(f"Failed to get recent trades for {symbol}: {e}")
             return []
     
-    async def get_ohlcv(self, symbol: str, timeframe: str = '1m', 
-                       since: Optional[int] = None, limit: int = 500) -> List[List]:
+    async def get_ohlcv(self, symbol: str, timeframe: str = '1m',
+                        since: Optional[int] = None, limit: int = 500) -> List[List]:
         """Get OHLCV candlestick data"""
         try:
+            ex_symbol = self._to_exchange_symbol(symbol)
             async with self.rate_limiter:
                 candles = await self.exchange.fetch_ohlcv(
-                    symbol, timeframe, since, limit
+                    ex_symbol, timeframe, since, limit
                 )
                 return candles
-                
         except Exception as e:
             logger.error(f"Failed to get OHLCV for {symbol}: {e}")
             return []
+
     
     def adjust_amount(self, symbol: str, amount: float) -> float:
         """Adjust order amount according to exchange rules"""

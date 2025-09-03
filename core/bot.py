@@ -383,21 +383,23 @@ class TradingBot:
     async def log_status(self):
         """Log current bot status"""
         try:
-            balance = await self.portfolio_manager.get_total_balance()
-            positions = len(await self.portfolio_manager.get_positions())
-            
-            # Calculate daily PnL
+            # get_total_balance is SYNC; get_positions is ASYNC
+            balance = self.portfolio_manager.get_total_balance()
+            positions_list = await self.portfolio_manager.get_positions()
+            positions = len(positions_list)
+
+            # performance_tracker daily PnL is sync (returns a float)
             daily_pnl = self.performance_tracker.get_daily_pnl()
-            
+
             logger.info(
                 f"📊 Status: Balance: ${balance:.2f} | "
                 f"Positions: {positions} | "
                 f"Daily PnL: {daily_pnl:.2f}% | "
                 f"Total Trades: {self.trading_stats['total_trades']}"
             )
-            
         except Exception as e:
             logger.error(f"❌ Failed to log status: {e}")
+
     
     async def close_all_positions(self):
         """Close all open positions (used during shutdown)"""

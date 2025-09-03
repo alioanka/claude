@@ -91,6 +91,8 @@
     "ml_strategy": {
         "name": "Machine Learning Ensemble",
         "enabled": true,
+        "model_dir": "storage/models",
+        "confidence_threshold": 0.55,
         "models": {
             "xgboost": {
                 "enabled": true,

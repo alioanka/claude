@@ -37,10 +37,13 @@ class TradingConfig:
 @dataclass
 class MLConfig:
     """Machine Learning configuration settings"""
+    enabled: bool = True
     retrain_interval: int = int(os.getenv("ML_RETRAIN_INTERVAL", "24"))
+    retrain_interval_hours: int = 24
     feature_lookback: int = int(os.getenv("FEATURE_LOOKBACK", "100"))
     confidence_threshold: float = float(os.getenv("MODEL_CONFIDENCE_THRESHOLD", "0.6"))
-    models_path: str = "ml/models/"
+    models_path: str = "storage/models"
+    min_samples_to_train: int = 500
     
 @dataclass
 class DatabaseConfig:

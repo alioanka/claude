@@ -20,6 +20,7 @@ from core.bot import TradingBot
 from utils.logger import setup_logger, initialize_logging_system
 from utils.notifications import NotificationManager
 from monitoring.health_checker import HealthChecker
+from monitoring.dashboard import DashboardManager
 
 # Setup logging first
 initialize_logging_system()
@@ -34,6 +35,7 @@ class TradingBotApplication:
         self.notification_manager: Optional[NotificationManager] = None
         self.shutdown_event = asyncio.Event()
         self.startup_time = datetime.utcnow()
+        self.dashboard_manager: Optional[DashboardManager] = None
         
     async def initialize(self):
         """Initialize all components"""
@@ -75,6 +77,17 @@ class TradingBotApplication:
                     await self.notification_manager.send_error_message(f"Bot initialization failed: {e}")
                 return False
             
+            # Initialize dashboard
+            try:
+                self.dashboard_manager = DashboardManager(
+                    self.bot.portfolio_manager.db_manager,
+                    self.bot.portfolio_manager
+                )
+                logger.info("✅ Dashboard manager initialized")
+            except Exception as e:
+                logger.warning(f"⚠️ Dashboard manager failed to initialize: {e}")
+                self.dashboard_manager = None
+            
             # Initialize health checker
             try:
                 self.health_checker = HealthChecker(self.bot, self.notification_manager)
@@ -112,6 +125,14 @@ class TradingBotApplication:
             if self.health_checker:
                 tasks.append(asyncio.create_task(self.health_checker.monitor()))
                 logger.info("🏥 Health monitoring task started")
+
+            # Start dashboard server
+            if self.dashboard_manager:
+                tasks.append(asyncio.create_task(self.dashboard_manager.start_dashboard(
+                    host="0.0.0.0", port=8000
+                )))
+                logger.info("📊 Dashboard task started on :8000")
+
             
             # Add shutdown handler task
             tasks.append(asyncio.create_task(self.wait_for_shutdown()))
@@ -303,10 +324,10 @@ async def create_health_check_server():
         runner = web.AppRunner(web_app)
         await runner.setup()
         
-        site = web.TCPSite(runner, '0.0.0.0', 8000)
+        site = web.TCPSite(runner, '0.0.0.0', 9090)
         await site.start()
         
-        logger.info("🌐 Health check server started on http://0.0.0.0:8000/health")
+        logger.info("🌐 Health check server started on http://0.0.0.0:9090/health")
         return runner
         
     except Exception as e:

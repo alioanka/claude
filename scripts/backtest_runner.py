@@ -20,10 +20,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data.database import DatabaseManager
 from strategies.momentum_strategy import MomentumStrategy
-from strategies.mean_reversion_strategy import MeanReversionStrategy
+from strategies.mean_reversion import MeanReversionStrategy
 from strategies.ml_strategy import MLStrategy
 from strategies.arbitrage_strategy import ArbitrageStrategy
-from core.risk_manager import RiskManager
+from risk.risk_manager import RiskManager
 from risk.portfolio_optimizer import PortfolioOptimizer
 from utils.indicators import TechnicalIndicators
 

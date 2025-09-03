@@ -56,8 +56,7 @@ class StrategyManager:
                 # Default allocation
                 self.strategy_allocation = {
                     'momentum_strategy': 0.6,
-                    'mean_reversion': 0.3,
-                    'arbitrage_strategy': 0.1
+                    'simple_ma': 0.4
                 }
             
             logger.info(f"📊 Strategy allocation loaded: {self.strategy_allocation}")
@@ -120,13 +119,13 @@ class StrategyManager:
                 logger.info("✅ Arbitrage Strategy loaded")
 
 
-            # Initialize ML Strategy (config-driven)
-            if 'ml_strategy' in self.strategy_allocation:
-                ml_params = {}
-                if hasattr(config, 'strategies') and 'ml_strategy' in getattr(config, 'strategies', {}):
-                    ml_params = config.strategies['ml_strategy']
-                self.strategies['ml_strategy'] = MLStrategy(ml_params)
-                logger.info("✅ ML Strategy loaded")
+                # Initialize ML Strategy (config-driven)
+                if 'ml_strategy' in self.strategy_allocation:
+                    ml_params = {}
+                    if hasattr(config, 'strategies') and 'ml_strategy' in getattr(config, 'strategies', {}):
+                        ml_params = config.strategies['ml_strategy']
+                    self.strategies['ml_strategy'] = MLStrategy(ml_params)
+                    logger.info("✅ ML Strategy loaded")
 
             
         except Exception as e:
@@ -280,3 +279,191 @@ class StrategyManager:
 
 # Basic Strategy Implementations for missing strategies
 
+class SimpleMAStrategy(BaseStrategy):
+    """Simple Moving Average Strategy"""
+    
+    def __init__(self):
+        super().__init__("Simple MA Strategy", timeframes=["1h"], parameters={'ma_fast': 10, 'ma_slow': 20})
+    
+    def get_required_data(self) -> Dict[str, Any]:
+        return {
+            'timeframes': self.timeframes,
+            'lookback_period': 50,
+            'required_indicators': ['sma_10', 'sma_20']
+        }
+    
+    async def analyze(self, symbol: str, market_data: Dict[str, Any]) -> StrategySignal:
+        try:
+            df = self.preprocess_data(market_data)
+            if df.empty or len(df) < 20:
+                return self._no_signal(symbol, "Insufficient data")
+            
+            # Calculate moving averages
+            df['sma_10'] = df['close'].rolling(10).mean()
+            df['sma_20'] = df['close'].rolling(20).mean()
+            
+            # Get current values
+            current_price = df['close'].iloc[-1]
+            sma_10 = df['sma_10'].iloc[-1]
+            sma_20 = df['sma_20'].iloc[-1]
+            
+            # Simple crossover logic
+            if sma_10 > sma_20 and df['sma_10'].iloc[-2] <= df['sma_20'].iloc[-2]:
+                # Bullish crossover
+                return StrategySignal(
+                    symbol=symbol,
+                    action="buy",
+                    confidence=0.7,
+                    entry_price=current_price,
+                    reasoning="MA bullish crossover",
+                    strategy_name=self.name
+                )
+            elif sma_10 < sma_20 and df['sma_10'].iloc[-2] >= df['sma_20'].iloc[-2]:
+                # Bearish crossover
+                return StrategySignal(
+                    symbol=symbol,
+                    action="sell",
+                    confidence=0.7,
+                    entry_price=current_price,
+                    reasoning="MA bearish crossover",
+                    strategy_name=self.name
+                )
+            else:
+                return self._no_signal(symbol, "No crossover detected")
+                
+        except Exception as e:
+            return self._no_signal(symbol, f"Analysis error: {e}")
+    
+    def _no_signal(self, symbol: str, reason: str) -> StrategySignal:
+        return StrategySignal(
+            symbol=symbol,
+            action="hold",
+            confidence=0.0,
+            reasoning=reason,
+            strategy_name=self.name
+        )
+
+
+class MeanReversionStrategy(BaseStrategy):
+    """Mean Reversion Strategy"""
+    
+    def __init__(self):
+        super().__init__("Mean Reversion Strategy", timeframes=["15m"], 
+                        parameters={'bb_period': 20, 'bb_std': 2, 'rsi_period': 14})
+    
+    def get_required_data(self) -> Dict[str, Any]:
+        return {
+            'timeframes': self.timeframes,
+            'lookback_period': 50,
+            'required_indicators': ['bb_upper', 'bb_lower', 'rsi']
+        }
+    
+    async def analyze(self, symbol: str, market_data: Dict[str, Any]) -> StrategySignal:
+        try:
+            df = self.preprocess_data(market_data)
+            if df.empty or len(df) < 20:
+                return self._no_signal(symbol, "Insufficient data")
+            
+            # Calculate indicators
+            df = self.calculate_indicators(df)
+            
+            if 'bb_upper' not in df.columns or 'rsi' not in df.columns:
+                return self._no_signal(symbol, "Missing indicators")
+            
+            # Get current values
+            current_price = df['close'].iloc[-1]
+            bb_upper = df['bb_upper'].iloc[-1]
+            bb_lower = df['bb_lower'].iloc[-1]
+            rsi = df['rsi'].iloc[-1]
+            
+            # Mean reversion logic
+            if current_price < bb_lower and rsi < 30:
+                # Oversold condition
+                return StrategySignal(
+                    symbol=symbol,
+                    action="buy",
+                    confidence=0.75,
+                    entry_price=current_price,
+                    reasoning="Oversold - below BB lower, RSI < 30",
+                    strategy_name=self.name
+                )
+            elif current_price > bb_upper and rsi > 70:
+                # Overbought condition
+                return StrategySignal(
+                    symbol=symbol,
+                    action="sell",
+                    confidence=0.75,
+                    entry_price=current_price,
+                    reasoning="Overbought - above BB upper, RSI > 70",
+                    strategy_name=self.name
+                )
+            else:
+                return self._no_signal(symbol, "No extreme conditions")
+                
+        except Exception as e:
+            return self._no_signal(symbol, f"Analysis error: {e}")
+    
+    def _no_signal(self, symbol: str, reason: str) -> StrategySignal:
+        return StrategySignal(
+            symbol=symbol,
+            action="hold",
+            confidence=0.0,
+            reasoning=reason,
+            strategy_name=self.name
+        )
+
+
+class MLStrategy(BaseStrategy):
+    """ML-based Strategy"""
+    
+    def __init__(self, ml_predictor):
+        super().__init__("ML Strategy", timeframes=["1h"], parameters={})
+        self.ml_predictor = ml_predictor
+    
+    def get_required_data(self) -> Dict[str, Any]:
+        return {
+            'timeframes': self.timeframes,
+            'lookback_period': 100,
+            'required_indicators': []
+        }
+    
+    async def analyze(self, symbol: str, market_data: Dict[str, Any]) -> StrategySignal:
+        try:
+            if not self.ml_predictor:
+                return self._no_signal(symbol, "No ML predictor available")
+            
+            # Get ML prediction
+            ml_signal = await self.ml_predictor.predict(symbol, market_data)
+            
+            if not ml_signal or ml_signal['action'] == 'hold':
+                return self._no_signal(symbol, "ML model suggests hold")
+            
+            # Convert ML signal to StrategySignal
+            action = ml_signal['action']
+            confidence = ml_signal['confidence']
+            
+            # Get current price for entry
+            current_price = None
+            if market_data and 'candles' in market_data and market_data['candles']:
+                current_price = float(market_data['candles'][-1][4])  # Close price
+            
+            return StrategySignal(
+                symbol=symbol,
+                action=action,
+                confidence=confidence,
+                entry_price=current_price,
+                reasoning=ml_signal.get('reasoning', 'ML prediction'),
+                strategy_name=self.name
+            )
+            
+        except Exception as e:
+            return self._no_signal(symbol, f"ML analysis error: {e}")
+    
+    def _no_signal(self, symbol: str, reason: str) -> StrategySignal:
+        return StrategySignal(
+            symbol=symbol,
+            action="hold",
+            confidence=0.0,
+            reasoning=reason,
+            strategy_name=self.name
+        )
