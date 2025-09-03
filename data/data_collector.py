@@ -61,7 +61,6 @@ class DataCollector:
     
     def __init__(self, exchange_manager: ExchangeManager):
         self.exchange_manager = exchange_manager
-        from config.config import config
         self.db_manager = DatabaseManager(config.database.url)
         
         # Data storage
