@@ -80,7 +80,7 @@ class PortfolioManager:
     
     def __init__(self, exchange_manager, initial_capital: float):
         self.exchange_manager = exchange_manager
-        self.db_manager = DatabaseManager()
+        self.db_manager = DatabaseManager(config.database.url)
         
         # Portfolio state
         self.initial_capital = initial_capital

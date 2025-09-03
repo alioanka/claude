@@ -82,7 +82,7 @@ class TradeExecutor:
         self.exchange_manager = exchange_manager
         self.portfolio_manager = portfolio_manager
         self.risk_manager = risk_manager
-        self.db_manager = DatabaseManager()
+        self.db_manager = DatabaseManager(config.database.url)
         
         # Order tracking
         self.active_orders: Dict[str, ActiveOrder] = {}
