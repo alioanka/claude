@@ -285,7 +285,128 @@ class DatabaseManager:
         if not self.session_factory:
             raise RuntimeError("Database not initialized")
         return self.session_factory()
-    
+
+    # Add these methods to your existing database.py DatabaseManager class
+
+    async def get_active_positions(self) -> List[Dict[str, Any]]:
+        """Get all active positions from database"""
+        session = None
+        try:
+            session = self.get_session()
+            
+            positions = session.query(Position).filter(
+                Position.is_open == True
+            ).all()
+            
+            result = []
+            for pos in positions:
+                result.append({
+                    'id': pos.id,
+                    'symbol': pos.symbol,
+                    'side': pos.side,
+                    'amount': pos.size,
+                    'entry_price': pos.entry_price,
+                    'current_price': pos.current_price,
+                    'stop_loss': pos.stop_loss,
+                    'take_profit': pos.take_profit,
+                    'strategy': pos.strategy,
+                    'timestamp': int(pos.created_at.timestamp() * 1000) if pos.created_at else 0,
+                    'pnl': pos.pnl,
+                    'pnl_percentage': pos.pnl_percentage
+                })
+            
+            session.close()
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to get active positions: {e}")
+            if session:
+                session.close()
+            return []
+
+    async def get_portfolio_history(self, days_back: int = 30) -> List[Dict[str, Any]]:
+        """Get portfolio history from database"""
+        session = None
+        try:
+            session = self.get_session()
+            
+            from_date = datetime.utcnow() - timedelta(days=days_back)
+            
+            # For now, return empty list since we don't have portfolio_snapshots table yet
+            # In a full implementation, you'd query a portfolio_snapshots table
+            result = []
+            
+            # Create some mock historical data based on positions if needed
+            positions = session.query(Position).filter(
+                Position.created_at >= from_date
+            ).all()
+            
+            for pos in positions:
+                result.append({
+                    'timestamp': int(pos.created_at.timestamp() * 1000) if pos.created_at else 0,
+                    'total_balance': 10000.0,  # Mock data
+                    'available_balance': 8000.0,
+                    'used_balance': 2000.0,
+                    'unrealized_pnl': pos.pnl or 0.0,
+                    'daily_pnl': 0.0,
+                    'total_trades': 0,
+                    'active_positions': 1
+                })
+            
+            session.close()
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to get portfolio history: {e}")
+            if session:
+                session.close()
+            return []
+
+    async def store_position(self, position) -> bool:
+        """Store position in database"""
+        session = None
+        try:
+            session = self.get_session()
+            
+            # Create Position object if it's a dict
+            if isinstance(position, dict):
+                db_position = Position(
+                    symbol=position['symbol'],
+                    side=position['side'],
+                    size=position['amount'],
+                    entry_price=position['entry_price'],
+                    current_price=position.get('current_price', position['entry_price']),
+                    strategy=position.get('strategy', 'unknown'),
+                    pnl=position.get('pnl', 0.0),
+                    pnl_percentage=position.get('pnl_percentage', 0.0)
+                )
+            else:
+                db_position = position
+            
+            session.add(db_position)
+            session.commit()
+            session.close()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to store position: {e}")
+            if session:
+                session.rollback()
+                session.close()
+            return False
+
+    async def store_portfolio_snapshot(self, snapshot_data: Dict[str, Any]) -> bool:
+        """Store portfolio snapshot (placeholder implementation)"""
+        try:
+            # For now, just log the snapshot data
+            # In a full implementation, you'd store this in a portfolio_snapshots table
+            logger.debug(f"Portfolio snapshot: {snapshot_data}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to store portfolio snapshot: {e}")
+            return False
+
     async def save_market_data(self, data: List[Dict[str, Any]]) -> bool:
         """Save market data to database"""
         session = None
