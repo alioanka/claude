@@ -92,7 +92,7 @@ class Config:
         """Get list of active trading pairs"""
         if "active_pairs" in self.trading_pairs:
             return self.trading_pairs["active_pairs"]
-        return ["BTCUSDT", "ETHUSDT", "ADAUSDT", "DOTUSDT", "LINKUSDT"]
+        return ["BTCUSDT", "ETHUSDT", "ADAUSDT", "SOLUSDT", "LINKUSDT"]
     
     def get_strategy_config(self, strategy_name: str) -> Dict[str, Any]:
         """Get configuration for a specific strategy"""

@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from sqlalchemy import (
     Column, String, Float, DateTime, Integer, Text, Boolean, 
-    ForeignKey, create_engine, Index
+    ForeignKey, create_engine, Index, text
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -197,26 +197,22 @@ class Signal(Base):
         }
 
 class DatabaseManager:
-    """Database manager with PostgreSQL support and SQLite fallback"""
+    """Database manager with PostgreSQL fallback to SQLite"""
     
     def __init__(self, database_url: str):
         self.database_url = database_url
         self.engine = None
         self.session_factory = None
-        self.is_postgres = False
-        self._check_dependencies()
         
-    def _check_dependencies(self):
-        """Check if PostgreSQL dependencies are available"""
-        try:
-            if 'postgresql' in self.database_url.lower():
+        # Determine database type and handle missing dependencies
+        self.is_postgres = 'postgresql' in database_url.lower()
+        
+        if self.is_postgres:
+            try:
                 import psycopg2
-                self.is_postgres = True
-                logger.info("PostgreSQL adapter (psycopg2) available")
-        except ImportError:
-            if 'postgresql' in self.database_url.lower():
-                logger.error("PostgreSQL adapter (psycopg2) not available but PostgreSQL URL provided")
-                logger.info("Falling back to SQLite")
+                logger.info("PostgreSQL adapter available")
+            except ImportError:
+                logger.warning("PostgreSQL adapter (psycopg2) not available, falling back to SQLite")
                 self.database_url = "sqlite:///storage/trading_bot.db"
                 self.is_postgres = False
         
@@ -227,25 +223,14 @@ class DatabaseManager:
             
             # Create engine based on database type
             if self.is_postgres:
-                try:
-                    self.engine = create_engine(
-                        self.database_url,
-                        pool_pre_ping=True,
-                        pool_recycle=300,
-                        echo=False
-                    )
-                except Exception as e:
-                    logger.error(f"PostgreSQL connection failed: {e}")
-                    logger.info("Falling back to SQLite")
-                    self.database_url = "sqlite:///storage/trading_bot.db"
-                    self.is_postgres = False
-                    self.engine = create_engine(
-                        self.database_url,
-                        connect_args={"check_same_thread": False},
-                        echo=False
-                    )
+                self.engine = create_engine(
+                    self.database_url,
+                    pool_pre_ping=True,
+                    pool_recycle=300,
+                    echo=False
+                )
             else:
-                # Ensure storage directory exists
+                # SQLite setup - ensure storage directory exists
                 import os
                 os.makedirs('storage', exist_ok=True)
                 
@@ -268,16 +253,24 @@ class DatabaseManager:
             
         except Exception as e:
             logger.error(f"Database initialization failed: {e}")
-            raise
+            
+            # If PostgreSQL fails, try SQLite fallback
+            if self.is_postgres:
+                logger.info("Attempting SQLite fallback...")
+                self.database_url = "sqlite:///storage/trading_bot.db"
+                self.is_postgres = False
+                await self.initialize()  # Retry with SQLite
+            else:
+                raise
     
     async def _test_connection(self):
-        """Test database connection"""
+        """Test database connection with SQLAlchemy 2.0 compatibility"""
         session = None
         try:
             session = self.get_session()
             
-            # Simple query to test connection
-            session.execute("SELECT 1")
+            # Use text() wrapper for raw SQL queries (SQLAlchemy 2.0+ requirement)
+            session.execute(text("SELECT 1"))
             session.close()
             logger.info("Database connection test successful")
             
@@ -391,7 +384,6 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error closing database connections: {e}")
     
-    # Keep all other methods as they are...
     async def get_latest_market_data(self, symbol: str, timeframe: str, limit: int = 100) -> List[MarketData]:
         """Get latest market data for a symbol"""
         session = None
@@ -414,6 +406,7 @@ class DatabaseManager:
     
     async def save_position(self, position_data: Dict[str, Any]) -> bool:
         """Save position to database"""
+        session = None
         try:
             session = self.get_session()
             
@@ -432,6 +425,7 @@ class DatabaseManager:
     
     async def get_open_positions(self) -> List[Position]:
         """Get all open positions"""
+        session = None
         try:
             session = self.get_session()
             
@@ -450,6 +444,7 @@ class DatabaseManager:
     
     async def save_trade(self, trade_data: Dict[str, Any]) -> bool:
         """Save trade to database"""
+        session = None
         try:
             session = self.get_session()
             
@@ -468,6 +463,7 @@ class DatabaseManager:
     
     async def save_signal(self, signal_data: Dict[str, Any]) -> bool:
         """Save trading signal to database"""
+        session = None
         try:
             session = self.get_session()
             
@@ -486,6 +482,7 @@ class DatabaseManager:
     
     async def get_signals(self, symbol: str = None, executed: bool = None, limit: int = 100) -> List[Signal]:
         """Get trading signals with optional filters"""
+        session = None
         try:
             session = self.get_session()
             
@@ -509,6 +506,7 @@ class DatabaseManager:
     
     async def update_position(self, position_id: str, updates: Dict[str, Any]) -> bool:
         """Update position with new data"""
+        session = None
         try:
             session = self.get_session()
             
@@ -533,6 +531,7 @@ class DatabaseManager:
     
     async def close_position(self, position_id: str, closing_price: float) -> bool:
         """Close a position"""
+        session = None
         try:
             session = self.get_session()
             
@@ -558,6 +557,7 @@ class DatabaseManager:
     
     async def get_performance_stats(self, days: int = 30) -> Dict[str, Any]:
         """Get performance statistics"""
+        session = None
         try:
             session = self.get_session()
             
@@ -602,6 +602,7 @@ class DatabaseManager:
     
     async def cleanup_old_data(self, days: int = 90):
         """Clean up old market data"""
+        session = None
         try:
             session = self.get_session()
             

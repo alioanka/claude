@@ -1,6 +1,6 @@
 # Database dependencies - Install first
 psycopg2-binary>=2.9.5
-sqlalchemy>=2.0.0
+sqlalchemy>=2.0.0,<2.1.0
 alembic>=1.12.0
 asyncpg>=0.29
 aiosqlite>=0.19.0
