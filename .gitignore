@@ -60,10 +60,13 @@ storage/historical/*
 storage/models/*
 storage/backups/*
 storage/exports/*
+storage/performance/*
 !storage/historical/.gitkeep
 !storage/models/.gitkeep
 !storage/backups/.gitkeep
 !storage/exports/.gitkeep
+
+performance/
 
 # Database files
 *.db
