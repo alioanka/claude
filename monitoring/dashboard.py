@@ -11,8 +11,9 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 import logging
-from data.database import DatabaseManager
+from data.database import DatabaseManager, Trade, Position
 from core.portfolio_manager import PortfolioManager
+
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,12 @@ class DashboardManager:
         async def get_recent_signals():
             """Get recent signals"""
             return await self.get_signals_data()
+        
+        @self.app.get("/api/rejections")
+        async def get_rejections():
+            """Get recent signal/order rejections"""
+            return await self.get_rejections_data()
+
     
     async def connect(self, websocket: WebSocket):
         """Accept websocket connection"""
@@ -178,6 +185,64 @@ class DashboardManager:
         except Exception as e:
             logger.error(f"Failed to get signals data: {e}")
             return []
+        
+    async def get_rejections_data(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Return recent rejection events (from DB if available; otherwise parse logs)."""
+        try:
+            # Preferred path: use DatabaseManager if it exposes get_rejections()
+            if hasattr(self.db, "get_rejections"):
+                rows = await self.db.get_rejections(limit=limit)
+                # Expect each row to have to_dict(); if not, normalize here:
+                out = []
+                for r in rows:
+                    if hasattr(r, "to_dict"):
+                        out.append(r.to_dict())
+                    else:
+                        out.append({
+                            "timestamp": getattr(r, "timestamp", None),
+                            "strategy": getattr(r, "strategy", None),
+                            "symbol": getattr(r, "symbol", None),
+                            "reason": getattr(r, "reason", None),
+                            "details": getattr(r, "details", None),
+                        })
+                return out
+
+            # Fallback: parse recent log files for "reject" patterns
+            import os, re, itertools
+            candidates = ["/app/logs/trading_bot.log", "/app/logs/trades.log", "trading_bot.log", "trades.log"]
+            pattern = re.compile(r"reject|rejected|rejection|denied|invalid", re.IGNORECASE)
+            events: List[Dict[str, Any]] = []
+
+            for path in candidates:
+                if not os.path.exists(path):
+                    continue
+                try:
+                    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                        # Read last ~500 lines efficiently
+                        lines = f.readlines()[-500:]
+                        for line in reversed(lines):  # newest first if logs append
+                            if pattern.search(line):
+                                # naive parse; you can refine this to match your log format
+                                events.append({
+                                    "timestamp": None,
+                                    "strategy": None,
+                                    "symbol": None,
+                                    "reason": line.strip(),
+                                    "details": None,
+                                })
+                                if len(events) >= limit:
+                                    break
+                except Exception:
+                    continue
+                if len(events) >= limit:
+                    break
+
+            return list(itertools.islice(events, 0, limit))
+
+        except Exception as e:
+            logger.error(f"Failed to get rejections data: {e}")
+            return []
+
     
     async def get_daily_pnl(self) -> float:
         """Calculate daily PnL"""
@@ -274,6 +339,22 @@ class DashboardManager:
                         </thead>
                         <tbody id="tradesBody">
                             <!-- Trades will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="chart-container">
+                    <h3>Recent Rejections</h3>
+                    <table id="rejectionsTable">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Strategy</th>
+                                <th>Symbol</th>
+                                <th>Reason</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rejectionsBody">
+                            <!-- Rejections will be populated by JavaScript -->
                         </tbody>
                     </table>
                 </div>
@@ -409,6 +490,37 @@ class DashboardManager:
                 window.onload = function() {
                     console.log('Dashboard loaded');
                 };
+
+                async function refreshRejections() {
+                    try {
+                        const res = await fetch('/api/rejections');
+                        const items = await res.json();
+                        const tbody = document.getElementById('rejectionsBody');
+                        if (!tbody) return;
+
+                        tbody.innerHTML = '';
+                        (items || []).forEach(ev => {
+                            const tr = document.createElement('tr');
+                            const ts = ev.timestamp ? new Date(ev.timestamp).toLocaleString() : '-';
+                            tr.innerHTML = `
+                                <td>${ts}</td>
+                                <td>${ev.strategy || '-'}</td>
+                                <td>${ev.symbol || '-'}</td>
+                                <td style="max-width:480px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${(ev.reason || ev.details || '').toString()}</td>
+                            `;
+                            tbody.appendChild(tr);
+                        });
+                    } catch (e) {
+                        console.error('Failed to refresh rejections:', e);
+                    }
+                }
+
+                // poll rejections every 10s
+                setInterval(refreshRejections, 10000);
+                // also load immediately at page open
+                refreshRejections();
+
+                // Consider calling refreshRejections() inside ws.onmessage if you want WS-driven refresh too
             </script>
         </body>
         </html>

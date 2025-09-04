@@ -29,9 +29,22 @@ trading:
 exchanges:
   binance:
     enabled: true
-    testnet: true
-    api_key: ""
-    api_secret: ""
+    testnet: false
+    api_key: "${BINANCE_API_KEY}"
+    api_secret: "${BINANCE_API_SECRET}"
+    sandbox: true
+  kucoin:
+    enabled: true
+    testnet: false
+    api_key: "${KUCOIN_API_KEY}"
+    api_secret: "${KUCOIN_API_SECRET}"
+    sandbox: true
+  bybit:
+    enabled: true
+    testnet: false
+    api_key: "${BYBIT_API_KEY}"
+    api_secret: "${BYBIT_API_SECRET}"
+    sandbox: true
     
 # Data Sources
 data:
@@ -57,6 +70,11 @@ ml:
 
 # Strategy Configuration
 strategies:
+  strategy_allocation:
+    momentum_strategy: 0.30
+    mean_reversion: 0.25
+    ml_strategy: 0.35
+    arbitrage_strategy: 0.10
   mean_reversion:
     enabled: true
     lookback_period: 20
@@ -70,6 +88,32 @@ strategies:
     model_type: "random_forest"
     retrain_frequency: 168  # hours (1 week)
     confidence_threshold: 0.6
+
+  arbitrage_strategy:
+    parameters:
+      arbitrage_params:
+        min_spread_threshold: 0.004
+        max_spread_threshold: 0.08
+        correlation_threshold: 0.80
+        lookback_period: 200
+        z_score_threshold: 2.0
+        transaction_cost: 0.002
+    exchanges:
+      binance:
+        enabled: true
+        api_key: "${BINANCE_API_KEY}"
+        secret: "${BINANCE_API_SECRET}"
+        sandbox: false
+      kucoin:
+        enabled: true
+        api_key: "${KUCOIN_API_KEY}"
+        secret: "${KUCOIN_API_SECRET}"
+        sandbox: false
+      bybit:
+        enabled: false
+        api_key: "${BYBIT_API_KEY}"
+        secret: "${BYBIT_API_SECRET}"
+        sandbox: false
 
 # Risk Management
 risk:

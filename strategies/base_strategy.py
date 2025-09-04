@@ -148,6 +148,82 @@ class BaseStrategy(ABC):
         except Exception as e:
             logger.error(f"❌ Data preprocessing failed for {self.name}: {e}")
             return pd.DataFrame()
+        
+    # --- ADD INSIDE BaseStrategy (strategies/base_strategy.py) ---
+    def _ensure_dataframe(self, data):
+        """
+        Normalize incoming market_data for strategies.
+
+        Accepts:
+        - pandas.DataFrame
+        - list[dict] with OHLCV-like keys
+        - list[list|tuple] shaped like [timestamp, open, high, low, close, volume]
+
+        Returns:
+        pandas.DataFrame with columns: ['timestamp','open','high','low','close','volume']
+        All numeric columns coerced; rows sorted by timestamp; drops duplicates.
+        """
+        try:
+            import pandas as pd
+
+            if data is None:
+                return pd.DataFrame(columns=['timestamp','open','high','low','close','volume'])
+
+            # Already a DataFrame
+            if hasattr(data, "columns"):
+                df = data.copy()
+
+            # List of dicts
+            elif isinstance(data, list) and data and isinstance(data[0], dict):
+                df = pd.DataFrame(data)
+
+            # List of lists/tuples (ccxt-style ohlcv: [ts, o, h, l, c, v])
+            elif isinstance(data, list) and data and isinstance(data[0], (list, tuple)):
+                cols = ['timestamp','open','high','low','close','volume']
+                df = pd.DataFrame(data, columns=cols[:len(data[0])])
+                # if only 5 cols provided (no volume), add it
+                if 'volume' not in df.columns and len(data[0]) == 5:
+                    df['volume'] = 0
+
+            else:
+                # Unknown type → empty frame
+                df = pd.DataFrame(columns=['timestamp','open','high','low','close','volume'])
+
+            # Canonicalize columns
+            rename_map = {
+                'time': 'timestamp',
+                'Date': 'timestamp',
+                'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'
+            }
+            df = df.rename(columns=rename_map)
+
+            # Ensure required columns exist
+            for col in ['timestamp','open','high','low','close','volume']:
+                if col not in df.columns:
+                    df[col] = 0
+
+            # Types & order
+            df = df[['timestamp','open','high','low','close','volume']].copy()
+            # Coerce numeric
+            for col in ['open','high','low','close','volume']:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            # Timestamp handling (ms or s)
+            if (df['timestamp'] > 10**12).any():
+                # looks like ms
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+            else:
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)
+
+            # Clean/sort
+            df = df.dropna(subset=['close']).drop_duplicates(subset=['timestamp']).sort_values('timestamp')
+            df = df.reset_index(drop=True)
+            return df
+
+        except Exception as e:
+            logger.error(f"{self.name}: _ensure_dataframe failed: {e}")
+            import pandas as pd
+            return pd.DataFrame(columns=['timestamp','open','high','low','close','volume'])
+
     
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """

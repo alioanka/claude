@@ -92,6 +92,8 @@ class ArbitrageStrategy(BaseStrategy):
     async def generate_signal(self, symbol: str, data: pd.DataFrame, **kwargs) -> Optional[Dict[str, Any]]:
         """Generate arbitrage signals"""
         try:
+            data = self._ensure_dataframe(data)
+
             signals = []
             
             # Cross-exchange arbitrage

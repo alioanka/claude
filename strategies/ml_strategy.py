@@ -110,6 +110,7 @@ class MLStrategy(BaseStrategy):
     async def generate_signal(self, symbol: str, data: pd.DataFrame, **kwargs) -> Optional[Dict[str, Any]]:
         """Generate ML-based trading signal"""
         try:
+            data = self._ensure_dataframe(data)
             if len(data) < self.lstm_config['sequence_length']:
                 return None
             
@@ -310,6 +311,7 @@ class MLStrategy(BaseStrategy):
     def _prepare_lstm_sequence(self, data: pd.DataFrame) -> Optional[np.ndarray]:
         """Prepare sequence data for LSTM"""
         try:
+            data = self._ensure_dataframe(data)
             sequence_length = self.lstm_config['sequence_length']
             if len(data) < sequence_length:
                 return None
