@@ -604,40 +604,32 @@ class ExchangeManager:
             return {'maker': 0.001, 'taker': 0.001}
     
     async def get_funding_rate(self, symbol: str) -> Optional[float]:
-        """Return the current funding rate, but ONLY for derivatives (swap/futures) symbols."""
+        """Get current funding rate for futures; returns None for spot or unsupported exchanges."""
         try:
-            # Not all exchanges implement this; bail out early if missing.
-            if not hasattr(self.exchange, "fetch_funding_rate"):
+            ex = getattr(self, "exchange", None)
+            if not ex:
                 return None
 
-            # Normalize e.g. BTCUSDT -> BTC/USDT for ccxt lookups
+            # Quick feature test
+            if not hasattr(ex, "fetch_funding_rate") or not callable(getattr(ex, "fetch_funding_rate")):
+                return None
+
+            # If your config has a market type, skip in spot mode
+            market_type = getattr(getattr(config, "exchange", object), "market_type", "spot")
+            if str(market_type).lower() == "spot":
+                return None
+
             ex_symbol = self._to_exchange_symbol(symbol)
-
             async with self.rate_limiter:
-                # Ensure markets are loaded so we can inspect symbol type
-                markets = getattr(self.exchange, "markets", None) or await self.exchange.load_markets()
-                market = markets.get(ex_symbol) or markets.get(symbol)
-                if not market:
-                    # Unknown market — play it safe and skip
-                    return None
-
-                # Only proceed for derivatives (swap, future, contract).
-                is_derivative = bool(
-                    market.get("swap") or market.get("future") or market.get("contract")
-                )
-                if not is_derivative:
-                    # Spot market: funding does not apply
-                    return None
-
-                # Safe to fetch funding rate
-                fr = await self.exchange.fetch_funding_rate(ex_symbol)
-                rate = fr.get("fundingRate")
-                return float(rate) if rate is not None else None
-
-        except Exception as e:
-            # Treat failures as "no rate" instead of warning spam
-            logger.debug(f"get_funding_rate skipped for {symbol}: {e}")
+                funding_rate = await ex.fetch_funding_rate(ex_symbol)
+            # ccxt returns various shapes; be tolerant
+            if isinstance(funding_rate, dict):
+                return float(funding_rate.get("fundingRate") or funding_rate.get("fundingRate", 0.0) or 0.0)
             return None
+        except Exception as e:
+            logger.debug(f"Funding rate fetch skipped for {symbol}: {e}")
+            return None
+
 
     
     async def get_market_status(self) -> Dict[str, Any]:

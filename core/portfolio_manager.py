@@ -164,7 +164,82 @@ class PortfolioManager:
             
         except Exception as e:
             logger.error(f"❌ Failed to load existing positions: {e}")
-    
+
+    async def get_total_value(self) -> float:
+        """
+        Return current portfolio total value in USDT.
+        Works in both paper and live modes. In paper mode, uses paper engine balance['total'].
+        In live mode, sums all assets at current mid/last price via ExchangeManager.
+        """
+        try:
+            # Prefer paper engine if enabled
+            if hasattr(self, "exchange_manager") and getattr(self.exchange_manager, "is_paper_trading", False):
+                pe = getattr(self.exchange_manager, "paper_engine", None)
+                if pe and isinstance(pe.balance, dict):
+                    return float(pe.balance.get("total", pe.balance.get("USDT", 0.0)))
+
+            # Live mode (or fallback): fetch balances and mark-to-market
+            total = 0.0
+            exm = getattr(self, "exchange_manager", None)
+            if not exm or not getattr(exm, "exchange", None):
+                return 0.0
+
+            async with exm.rate_limiter:
+                balances = await exm.exchange.fetch_balance()
+            # Sum free + used (total)
+            for asset, bal in balances.get("total", {}).items():
+                amount = float(bal or 0.0)
+                if amount <= 0:
+                    continue
+                if asset.upper() in ("USDT", "USD", "BUSD"):
+                    total += amount
+                else:
+                    price = await exm.get_market_price(f"{asset.upper()}USDT")
+                    if price:
+                        total += amount * float(price)
+            return float(total)
+        except Exception:
+            return 0.0
+
+    async def get_portfolio_status(self) -> dict:
+        """
+        Return a dict for the dashboard with keys:
+          - total_value (float)
+          - open_positions (int)
+          - cash (float)  (USDT only in paper; best-effort in live)
+          - timestamp (iso)
+        """
+        exm = getattr(self, "exchange_manager", None)
+        total_value = await self.get_total_value()
+
+        open_positions = 0
+        cash = 0.0
+
+        try:
+            # Paper mode: read from paper engine
+            if exm and getattr(exm, "is_paper_trading", False) and getattr(exm, "paper_engine", None):
+                pe = exm.paper_engine
+                open_positions = len(pe.positions)
+                cash = float(pe.balance.get("USDT", 0.0))
+            else:
+                # Live mode: best-effort—count open positions if you maintain them here,
+                # otherwise 0; and try to read USDT free
+                if exm and exm.exchange:
+                    async with exm.rate_limiter:
+                        balances = await exm.exchange.fetch_balance()
+                    cash = float(balances.get("free", {}).get("USDT", 0.0))
+                # If you maintain open positions in DB, you can improve this by querying it.
+        except Exception:
+            pass
+
+        return {
+            "total_value": total_value,
+            "open_positions": int(open_positions),
+            "cash": cash,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+
     async def load_performance_history(self, days_back: int = 30):
         """Load portfolio performance history"""
         try:

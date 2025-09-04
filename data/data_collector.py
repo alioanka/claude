@@ -402,6 +402,12 @@ class DataCollector:
     async def collect_funding_rates(self):
         """Collect funding rates for futures"""
         try:
+            # Fast capability check once
+            ex = getattr(self.exchange_manager, "exchange", None)
+            if not ex or not hasattr(ex, "fetch_funding_rate"):
+                logger.info("Funding rate collection disabled: exchange has no fetch_funding_rate")
+                return
+
             while self.is_collecting:
                 try:
                     for symbol in TRADING_PAIRS:
@@ -409,18 +415,17 @@ class DataCollector:
                             funding_rate = await self.exchange_manager.get_funding_rate(symbol)
                             if funding_rate is not None:
                                 self.market_data[symbol].funding_rate = funding_rate
-                        
                         except Exception as e:
                             logger.debug(f"Funding rate collection error for {symbol}: {e}")
-                    
+
                     await asyncio.sleep(300)  # Update every 5 minutes
-                
                 except Exception as e:
                     logger.error(f"❌ Funding rate collection error: {e}")
                     await asyncio.sleep(300)
-        
+
         except Exception as e:
             logger.error(f"❌ Funding rate collection failed: {e}")
+
     
     async def get_latest_data(self, symbol: str, timeframe: str = '1m', 
                             count: int = 100) -> Optional[List[Dict]]:

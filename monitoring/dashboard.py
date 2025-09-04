@@ -56,6 +56,11 @@ class DashboardManager:
             """Get current positions"""
             return await self.get_positions_data()
         
+        @self.app.get("/health")
+        async def health():
+            return {"status": "ok", "time": datetime.utcnow().isoformat()}
+
+        
         @self.app.get("/api/performance")
         async def get_performance():
             """Get performance metrics"""
@@ -275,9 +280,8 @@ class DashboardManager:
             </div>
             
             <script>
-                const ws = new WebSocket(
-                    (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws'
-                );
+                const wsProto = (location.protocol === 'https:') ? 'wss' : 'ws';
+                const ws = new WebSocket(`${wsProto}://${window.location.host}/ws`);
 
                 let portfolioChart;
                 

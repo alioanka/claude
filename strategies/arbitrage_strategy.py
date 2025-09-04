@@ -12,7 +12,8 @@ import asyncio
 from dataclasses import dataclass
 import ccxt
 
-from .base_strategy import BaseStrategy
+from strategies.base_strategy import BaseStrategy, StrategySignal
+
 from utils.indicators import TechnicalIndicators
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,23 @@ class ArbitrageStrategy(BaseStrategy):
                     
         except Exception as e:
             logger.error(f"Exchange initialization failed: {e}")
+
+    def _to_strategy_signal(self, symbol: str, s: dict) -> StrategySignal:
+        """Map internal dict signal → StrategySignal expected by the framework."""
+        return StrategySignal(
+            symbol=s.get('symbol', symbol),
+            action='buy' if s.get('side') in ('buy', 'long') else
+                   'sell' if s.get('side') in ('sell', 'short') else 'hold',
+            confidence=float(s.get('confidence', 0.0)),
+            entry_price=s.get('entry_price'),
+            stop_loss=s.get('stop_loss'),
+            take_profit=s.get('take_profit'),
+            position_size=s.get('position_size'),
+            reasoning=s.get('reasoning', ''),
+            timeframe=s.get('timeframe', '1m'),
+            strategy_name=self.name
+        )
+
     
     async def generate_signal(self, symbol: str, data: pd.DataFrame, **kwargs) -> Optional[Dict[str, Any]]:
         """Generate arbitrage signals"""
@@ -117,18 +135,26 @@ class ArbitrageStrategy(BaseStrategy):
             "notes": "Pairs/stat-arb will request additional symbols internally"
         }
 
-    async def analyze(self, symbol: str, data: pd.DataFrame) -> List[Dict[str, Any]]:
+    async def analyze(self, symbol: str, market_data: Dict[str, Any]) -> StrategySignal:
         """
-        Adapter to the framework's abstract method.
-        Leverages this class's existing generate_signal() to produce normalized output.
-        Must return a LIST of signal dicts per the BaseStrategy contract.
+        Framework entrypoint: accepts market_data dict, converts to DataFrame,
+        delegates to generate_signal(), then returns a StrategySignal.
         """
         try:
-            sig = await self.generate_signal(symbol, data)  # your existing method
-            return [sig] if sig else []
+            df = self.preprocess_data(market_data)   # <-- THIS fixes the list→DataFrame issue
+            if df.empty or len(df) < max(60, self.arb_config.lookback_period):
+                return StrategySignal(symbol, 'hold', 0.0, strategy_name=self.name)
+
+            sig_dict = await self.generate_signal(symbol, df)
+            if not sig_dict:
+                return StrategySignal(symbol, 'hold', 0.0, strategy_name=self.name)
+
+            return self._to_strategy_signal(symbol, sig_dict)
+
         except Exception as e:
             logger.exception(f"[ArbitrageStrategy] analyze() failed for {symbol}: {e}")
-            return []
+            return StrategySignal(symbol, 'hold', 0.0, strategy_name=self.name)
+
 
 
     async def _check_cross_exchange_arbitrage(self, symbol: str) -> Optional[Dict[str, Any]]:

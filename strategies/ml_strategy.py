@@ -12,7 +12,8 @@ import joblib
 import warnings
 warnings.filterwarnings('ignore')
 
-from .base_strategy import BaseStrategy
+from strategies.base_strategy import BaseStrategy, StrategySignal
+
 from utils.indicators import TechnicalIndicators
 
 # ML Libraries
@@ -89,7 +90,23 @@ class MLStrategy(BaseStrategy):
         
         # Load existing models
         asyncio.create_task(self._load_models())
-    
+
+    def _to_strategy_signal(self, symbol: str, s: dict) -> StrategySignal:
+        return StrategySignal(
+            symbol=s.get('symbol', symbol),
+            action='buy' if s.get('side') in ('buy', 'long') else
+                   'sell' if s.get('side') in ('sell', 'short') else 'hold',
+            confidence=float(s.get('confidence', 0.0)),
+            entry_price=s.get('entry_price'),
+            stop_loss=s.get('stop_loss'),
+            take_profit=s.get('take_profit'),
+            position_size=s.get('position_size'),
+            reasoning=s.get('reasoning', ''),
+            timeframe=s.get('timeframe', '1m'),
+            strategy_name=self.name
+        )
+
+
     async def generate_signal(self, symbol: str, data: pd.DataFrame, **kwargs) -> Optional[Dict[str, Any]]:
         """Generate ML-based trading signal"""
         try:
@@ -145,16 +162,26 @@ class MLStrategy(BaseStrategy):
             ],
         }
 
-    async def analyze(self, symbol: str, data: pd.DataFrame) -> List[Dict[str, Any]]:
+    async def analyze(self, symbol: str, market_data: Dict[str, Any]) -> StrategySignal:
         """
-        Adapter required by BaseStrategy. Calls your generate_signal() and returns list.
+        Framework entrypoint: accepts market_data dict, converts to DataFrame,
+        runs feature engineering & prediction, and returns a StrategySignal.
         """
         try:
-            sig = await self.generate_signal(symbol, data)  # your existing method
-            return [sig] if sig else []
+            df = self.preprocess_data(market_data)   # <-- unified conversion
+            if df.empty or len(df) < self.lstm_config.get('sequence_length', 60):
+                return StrategySignal(symbol, 'hold', 0.0, strategy_name=self.name)
+
+            sig_dict = await self.generate_signal(symbol, df)
+            if not sig_dict:
+                return StrategySignal(symbol, 'hold', 0.0, strategy_name=self.name)
+
+            return self._to_strategy_signal(symbol, sig_dict)
+
         except Exception as e:
             logger.exception(f"[MLStrategy] analyze() failed for {symbol}: {e}")
-            return []
+            return StrategySignal(symbol, 'hold', 0.0, strategy_name=self.name)
+
 
 
     async def _engineer_features(self, data: pd.DataFrame) -> pd.DataFrame:
