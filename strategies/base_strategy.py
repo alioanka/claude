@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 import pandas as pd
 import numpy as np
+from types import SimpleNamespace
 
 from config.config import config
 from utils.logger import setup_logger
@@ -261,6 +262,49 @@ class BaseStrategy(ABC):
         except Exception as e:
             logger.error(f"{self.name}: _ensure_dataframe failed: {e}")
             return pd.DataFrame()
+        
+    # strategies/base_strategy.py
+
+
+
+    def _no_signal(self, symbol: str, reason: str = "no-signal"):
+        """
+        Return a benign 'hold' signal-like object with a reason so the manager
+        can log a parseable rejection without crashing. Prefer a StrategySignal
+        if it's importable; fall back to a SimpleNamespace (duck-typing) so we
+        don't create a hard import dependency here.
+        """
+        # Try to use the project's StrategySignal if available
+        try:
+            # Adjust this import to match your project’s actual location of StrategySignal
+            from strategies.models import StrategySignal  # <-- if your code keeps it elsewhere, update this path
+            return StrategySignal(
+                symbol=symbol,
+                action="hold",
+                confidence=0.0,
+                entry_price=None,
+                stop_loss=None,
+                take_profit=None,
+                position_size=None,
+                reasoning=reason or "no-signal",
+                timeframe=getattr(self, "timeframe", "1m"),
+                strategy_name=getattr(self, "name", self.__class__.__name__),
+            )
+        except Exception:
+            # Non-fatal: return a simple object with the attrs the manager reads
+            return SimpleNamespace(
+                symbol=symbol,
+                action="hold",
+                confidence=0.0,
+                entry_price=None,
+                stop_loss=None,
+                take_profit=None,
+                position_size=None,
+                reasoning=reason or "no-signal",
+                timeframe=getattr(self, "timeframe", "1m"),
+                strategy_name=getattr(self, "name", self.__class__.__name__),
+            )
+
 
     
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
