@@ -163,26 +163,51 @@ class MLStrategy(BaseStrategy):
             ],
         }
 
-    async def analyze(self, symbol: str, market_data: Dict[str, Any]) -> StrategySignal:
+    async def analyze(self, symbol: str, market_data: Dict[str, Any]):
         """
-        Framework entrypoint: accepts market_data dict, converts to DataFrame,
-        runs feature engineering & prediction, and returns a StrategySignal.
+        Adapter: consume raw market_data, run ML, return StrategySignal.
         """
         try:
-            df = self.preprocess_data(market_data)   # <-- unified conversion
-            if df.empty or len(df) < self.lstm_config.get('sequence_length', 60):
-                return StrategySignal(symbol, 'hold', 0.0, strategy_name=self.name)
+            df = self._ensure_dataframe(market_data, lookback=self.lstm_config.get("sequence_length", 60)*3)
+            if df is None or df.empty or len(df) < self.lstm_config.get("sequence_length", 60):
+                return self._no_signal(symbol, "Insufficient data")
 
-            sig_dict = await self.generate_signal(symbol, df)
-            if not sig_dict:
-                return StrategySignal(symbol, 'hold', 0.0, strategy_name=self.name)
+            # If your predictor has no models yet, explain it so dashboard shows why
+            if getattr(self, "predictor", None) is None or not getattr(self.predictor, "models", []):
+                return self._no_signal(symbol, "No ML models loaded")
 
-            return self._to_strategy_signal(symbol, sig_dict)
+            sig = await self.generate_signal(symbol, df)  # dict or None
+            if not sig:
+                return self._no_signal(symbol, "No ML edge")
 
+            action = (sig.get("action") or ("buy" if float(sig.get("prob_up", 0)) >= 0.5 else "sell")).lower()
+            if action in ("long", "buy"):
+                action = "buy"
+            elif action in ("short", "sell"):
+                action = "sell"
+            else:
+                action = "hold"
+
+            conf = float(sig.get("confidence", sig.get("prob", 0.5)))
+            entry = float(sig.get("entry_price", df["close"].iloc[-1]))
+            sl = sig.get("stop_loss")
+            tp = sig.get("take_profit")
+
+            return StrategySignal(
+                symbol=symbol,
+                action=action if conf >= self.min_confidence else "hold",
+                confidence=conf,
+                entry_price=entry,
+                stop_loss=sl,
+                take_profit=tp,
+                position_size=None,
+                reasoning=sig.get("reasoning", "ML ensemble"),
+                timeframe="1m",
+                strategy_name=self.name
+            )
         except Exception as e:
-            logger.exception(f"[MLStrategy] analyze() failed for {symbol}: {e}")
-            return StrategySignal(symbol, 'hold', 0.0, strategy_name=self.name)
-
+            logger.error(f"[MLStrategy] analyze failed for {symbol}: {e}")
+            return self._no_signal(symbol, f"error: {e}")
 
 
     async def _engineer_features(self, data: pd.DataFrame) -> pd.DataFrame:

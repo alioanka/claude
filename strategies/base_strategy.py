@@ -168,80 +168,99 @@ class BaseStrategy(ABC):
             return pd.DataFrame()
 
         
-    # --- ADD INSIDE BaseStrategy (strategies/base_strategy.py) ---
-    def _ensure_dataframe(self, data):
+
+
+    def _ensure_dataframe(
+        self,
+        market_data: Any,
+        since: Optional[int] = None,     # epoch ms or None
+        lookback: Optional[int] = None   # rows to keep
+    ) -> pd.DataFrame:
         """
-        Normalize incoming market_data for strategies.
+        Normalize market_data (list[dict], list[list], or {'candles': ...}) to a
+        DataFrame with columns: timestamp, open, high, low, close, volume.
 
-        Accepts:
-        - pandas.DataFrame
-        - list[dict] with OHLCV-like keys
-        - list[list|tuple] shaped like [timestamp, open, high, low, close, volume]
-
-        Returns:
-        pandas.DataFrame with columns: ['timestamp','open','high','low','close','volume']
-        All numeric columns coerced; rows sorted by timestamp; drops duplicates.
+        Handles mixed timestamp types safely. If `since` is provided (epoch ms),
+        rows older than that are filtered *after* converting to datetime.
         """
         try:
-            import pandas as pd
-
-            if data is None:
-                return pd.DataFrame(columns=['timestamp','open','high','low','close','volume'])
-
-            # Already a DataFrame
-            if hasattr(data, "columns"):
-                df = data.copy()
-
-            # List of dicts
-            elif isinstance(data, list) and data and isinstance(data[0], dict):
-                df = pd.DataFrame(data)
-
-            # List of lists/tuples (ccxt-style ohlcv: [ts, o, h, l, c, v])
-            elif isinstance(data, list) and data and isinstance(data[0], (list, tuple)):
-                cols = ['timestamp','open','high','low','close','volume']
-                df = pd.DataFrame(data, columns=cols[:len(data[0])])
-                # if only 5 cols provided (no volume), add it
-                if 'volume' not in df.columns and len(data[0]) == 5:
-                    df['volume'] = 0
-
+            # 1) Extract candles
+            candles = None
+            if isinstance(market_data, dict) and "candles" in market_data:
+                candles = market_data["candles"]
+            elif isinstance(market_data, list):
+                candles = market_data
             else:
-                # Unknown type → empty frame
-                df = pd.DataFrame(columns=['timestamp','open','high','low','close','volume'])
+                return pd.DataFrame()
 
-            # Canonicalize columns
-            rename_map = {
-                'time': 'timestamp',
-                'Date': 'timestamp',
-                'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'
-            }
-            df = df.rename(columns=rename_map)
+            if not candles:
+                return pd.DataFrame()
 
-            # Ensure required columns exist
-            for col in ['timestamp','open','high','low','close','volume']:
-                if col not in df.columns:
-                    df[col] = 0
-
-            # Types & order
-            df = df[['timestamp','open','high','low','close','volume']].copy()
-            # Coerce numeric
-            for col in ['open','high','low','close','volume']:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            # Timestamp handling (ms or s)
-            if (df['timestamp'] > 10**12).any():
-                # looks like ms
-                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
+            # 2) Build DF from dicts or OHLCV lists
+            if isinstance(candles[0], dict):
+                df = pd.DataFrame(candles)
+                # Try common timestamp keys → unify to 'timestamp' in ms
+                if "timestamp" not in df.columns:
+                    if "close_time" in df.columns:
+                        df["timestamp"] = df["close_time"]
+                    elif "open_time" in df.columns:
+                        df["timestamp"] = df["open_time"]
+                # coerce numerics
+                for col in ("open","high","low","close","volume"):
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors="coerce")
+                    else:
+                        df[col] = pd.NA
             else:
-                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)
+                # Assume ccxt OHLCV: [ts, o, h, l, c, v]
+                cols = ["timestamp","open","high","low","close","volume"]
+                df = pd.DataFrame(candles, columns=cols[:len(candles[0])])
+                # Coerce numerics
+                for col in ("open","high","low","close","volume"):
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors="coerce")
 
-            # Clean/sort
-            df = df.dropna(subset=['close']).drop_duplicates(subset=['timestamp']).sort_values('timestamp')
-            df = df.reset_index(drop=True)
+            # 3) Clean & sort
+            if "timestamp" not in df.columns:
+                return pd.DataFrame()
+
+            # Convert timestamp → datetime64[ns]; accept int(ms), str, or datetime
+            if pd.api.types.is_datetime64_any_dtype(df["timestamp"]):
+                ts = df["timestamp"]
+            else:
+                # try epoch ms first; fallback to generic parse
+                ts = pd.to_datetime(df["timestamp"], unit="ms", errors="ignore")
+                ts = pd.to_datetime(ts, errors="coerce")
+            df["timestamp"] = ts
+
+            # Drop bad rows, sort by time
+            df = df.dropna(subset=["timestamp","close"]).sort_values("timestamp").reset_index(drop=True)
+
+            # 4) Apply `since` filter SAFELY (convert since ms → datetime)
+            if since is not None:
+                try:
+                    since_dt = pd.to_datetime(int(since), unit="ms", utc=False)
+                    df = df[df["timestamp"] >= since_dt]
+                except Exception:
+                    # If `since` is malformed, ignore filter rather than crash
+                    pass
+
+            # 5) Apply lookback row trim
+            if lookback is None:
+                lookback = getattr(self, "lookback_period", 300)
+            if lookback and len(df) > lookback:
+                df = df.tail(lookback)
+
+            # Final numeric coercion
+            for col in ("open","high","low","close","volume"):
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+            df = df.dropna(subset=["close"])
+
             return df
-
         except Exception as e:
             logger.error(f"{self.name}: _ensure_dataframe failed: {e}")
-            import pandas as pd
-            return pd.DataFrame(columns=['timestamp','open','high','low','close','volume'])
+            return pd.DataFrame()
 
     
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:

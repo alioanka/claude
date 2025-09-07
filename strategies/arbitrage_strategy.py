@@ -137,25 +137,49 @@ class ArbitrageStrategy(BaseStrategy):
             "notes": "Pairs/stat-arb will request additional symbols internally"
         }
 
-    async def analyze(self, symbol: str, market_data: Dict[str, Any]) -> StrategySignal:
+    async def analyze(self, symbol: str, market_data: Dict[str, Any]):
         """
-        Framework entrypoint: accepts market_data dict, converts to DataFrame,
-        delegates to generate_signal(), then returns a StrategySignal.
+        Adapter: consume raw market_data, produce a StrategySignal using normalized DF.
         """
         try:
-            df = self.preprocess_data(market_data)   # <-- THIS fixes the list→DataFrame issue
-            if df.empty or len(df) < max(60, self.arb_config.lookback_period):
-                return StrategySignal(symbol, 'hold', 0.0, strategy_name=self.name)
+            # Use the same normalizer everywhere
+            df = self._ensure_dataframe(market_data, lookback=getattr(self, "lookback_period", 200))
+            if df is None or df.empty or len(df) < getattr(self, "min_bars", 50):
+                return self._no_signal(symbol, "Insufficient data")
 
-            sig_dict = await self.generate_signal(symbol, df)
-            if not sig_dict:
-                return StrategySignal(symbol, 'hold', 0.0, strategy_name=self.name)
+            sig = await self.generate_signal(symbol, df)  # your internal dict-like signal
+            if not sig:
+                return self._no_signal(symbol, "No arb opportunity")
 
-            return self._to_strategy_signal(symbol, sig_dict)
+            action = sig.get("action") or sig.get("side")
+            action = (str(action).lower() if action else "hold")
+            if action in ("long", "buy"):
+                action = "buy"
+            elif action in ("short", "sell"):
+                action = "sell"
+            else:
+                action = "hold"
 
+            conf = float(sig.get("confidence", 0.0))
+            entry = sig.get("entry_price") or sig.get("buy_price") or sig.get("sell_price")
+            sl = sig.get("stop_loss")
+            tp = sig.get("take_profit")
+
+            return StrategySignal(
+                symbol=symbol,
+                action=action if conf >= self.min_confidence else "hold",
+                confidence=conf,
+                entry_price=entry,
+                stop_loss=sl,
+                take_profit=tp,
+                position_size=None,
+                reasoning=sig.get("reasoning", "arbitrage"),
+                timeframe="1m",
+                strategy_name=self.name
+            )
         except Exception as e:
-            logger.exception(f"[ArbitrageStrategy] analyze() failed for {symbol}: {e}")
-            return StrategySignal(symbol, 'hold', 0.0, strategy_name=self.name)
+            logger.error(f"[ArbitrageStrategy] analyze failed for {symbol}: {e}")
+            return self._no_signal(symbol, f"error: {e}")
 
 
 

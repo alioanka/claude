@@ -211,8 +211,11 @@ class DashboardManager:
                         })
                 return out[:limit]
 
-            # 2) Log fallback
+            # monitoring/dashboard.py (inside the log-fallback branch of get_rejections_data)
+
             import os, re, datetime
+            from datetime import datetime, timezone
+
             path = os.path.join("logs", "trading_bot.log")
             if not os.path.exists(path):
                 return []
@@ -225,19 +228,33 @@ class DashboardManager:
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
                     m = pattern.search(line)
-                    if m:
-                        d = m.groupdict()
-                        items.append({
-                            "timestamp": d["ts"],
-                            "strategy": d["strategy"],
-                            "symbol": d["symbol"],
-                            "reason": d["reason"].strip(),
-                            "confidence": float(d["conf"])
-                        })
+                    if not m:
+                        continue
+                    d = m.groupdict()
 
-            # newest first
-            items.sort(key=lambda x: x["timestamp"], reverse=True)
+                    # Convert "YYYY-MM-DD HH:MM:SS,mmm" -> ISO8601 + epoch ms
+                    try:
+                        dt = datetime.strptime(d["ts"], "%Y-%m-%d %H:%M:%S,%f").replace(tzinfo=timezone.utc)
+                        ts_iso = dt.isoformat()            # e.g. "2025-09-07T20:19:03.074+00:00"
+                        ts_epoch = int(dt.timestamp() * 1000)
+                    except Exception:
+                        # Fallback to raw string if parsing ever fails
+                        ts_iso = d["ts"]
+                        ts_epoch = None
+
+                    items.append({
+                        "timestamp": ts_iso,               # browser-friendly
+                        "ts_epoch": ts_epoch,              # number for charts/sorting
+                        "strategy": d["strategy"],
+                        "symbol": d["symbol"],
+                        "reason": d["reason"].strip(),
+                        "confidence": float(d["conf"]),
+                    })
+
+            # newest first by epoch if available
+            items.sort(key=lambda x: x.get("ts_epoch") or x["timestamp"], reverse=True)
             return items[:limit]
+
 
         except Exception as e:
             logger.error(f"Failed to retrieve rejections: {e}")
