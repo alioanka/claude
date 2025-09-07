@@ -186,13 +186,17 @@ class DashboardManager:
             logger.error(f"Failed to get signals data: {e}")
             return []
         
+    # monitoring/dashboard.py
     async def get_rejections_data(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """Return recent rejection events (from DB if available; otherwise parse logs)."""
+        """
+        Return recent rejection events:
+        1) If DatabaseManager exposes get_rejections(), use it.
+        2) Else parse logs/trading_bot.log for lines starting with 'REJECTION | '.
+        """
         try:
-            # Preferred path: use DatabaseManager if it exposes get_rejections()
+            # 1) DB path (if implemented)
             if hasattr(self.db, "get_rejections"):
                 rows = await self.db.get_rejections(limit=limit)
-                # Expect each row to have to_dict(); if not, normalize here:
                 out = []
                 for r in rows:
                     if hasattr(r, "to_dict"):
@@ -203,44 +207,40 @@ class DashboardManager:
                             "strategy": getattr(r, "strategy", None),
                             "symbol": getattr(r, "symbol", None),
                             "reason": getattr(r, "reason", None),
-                            "details": getattr(r, "details", None),
+                            "confidence": float(getattr(r, "confidence", 0.0)),
                         })
-                return out
+                return out[:limit]
 
-            # Fallback: parse recent log files for "reject" patterns
-            import os, re, itertools
-            candidates = ["/app/logs/trading_bot.log", "/app/logs/trades.log", "trading_bot.log", "trades.log"]
-            pattern = re.compile(r"reject|rejected|rejection|denied|invalid", re.IGNORECASE)
-            events: List[Dict[str, Any]] = []
+            # 2) Log fallback
+            import os, re, datetime
+            path = os.path.join("logs", "trading_bot.log")
+            if not os.path.exists(path):
+                return []
 
-            for path in candidates:
-                if not os.path.exists(path):
-                    continue
-                try:
-                    with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                        # Read last ~500 lines efficiently
-                        lines = f.readlines()[-500:]
-                        for line in reversed(lines):  # newest first if logs append
-                            if pattern.search(line):
-                                # naive parse; you can refine this to match your log format
-                                events.append({
-                                    "timestamp": None,
-                                    "strategy": None,
-                                    "symbol": None,
-                                    "reason": line.strip(),
-                                    "details": None,
-                                })
-                                if len(events) >= limit:
-                                    break
-                except Exception:
-                    continue
-                if len(events) >= limit:
-                    break
+            pattern = re.compile(
+                r"(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}).*REJECTION \| strategy=(?P<strategy>\S+) symbol=(?P<symbol>\S+) reason=(?P<reason>.+?) conf=(?P<conf>[\d\.]+)"
+            )
 
-            return list(itertools.islice(events, 0, limit))
+            items = []
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    m = pattern.search(line)
+                    if m:
+                        d = m.groupdict()
+                        items.append({
+                            "timestamp": d["ts"],
+                            "strategy": d["strategy"],
+                            "symbol": d["symbol"],
+                            "reason": d["reason"].strip(),
+                            "confidence": float(d["conf"])
+                        })
+
+            # newest first
+            items.sort(key=lambda x: x["timestamp"], reverse=True)
+            return items[:limit]
 
         except Exception as e:
-            logger.error(f"Failed to get rejections data: {e}")
+            logger.error(f"Failed to retrieve rejections: {e}")
             return []
 
     

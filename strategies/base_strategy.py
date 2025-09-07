@@ -107,47 +107,66 @@ class BaseStrategy(ABC):
         """
         pass
     
+    # strategies/base_strategy.py
     def preprocess_data(self, market_data: Dict[str, Any]) -> pd.DataFrame:
         """
-        Preprocess market data into DataFrame format
-        
-        Args:
-            market_data: Raw market data
-            
-        Returns:
-            pd.DataFrame: Processed OHLCV data with timestamps
+        Accepts either:
+        • dict with key 'candles': list[dict] OR list[list] (ccxt OHLCV)
+        • list[dict] (already candles)
+        • list[list] (ccxt OHLCV rows)
+        Produces a DataFrame with columns: timestamp, open, high, low, close, volume
         """
+        import pandas as pd
         try:
-            if not market_data or 'candles' not in market_data:
+            candles = None
+
+            # 1) dict case
+            if isinstance(market_data, dict) and 'candles' in market_data:
+                candles = market_data['candles']
+
+            # 2) list case (DataCollector.get_latest_data returns list[dict])
+            elif isinstance(market_data, list):
+                candles = market_data
+
+            if candles is None or not candles:
                 return pd.DataFrame()
-            
-            candles = market_data['candles']
-            if not candles:
-                return pd.DataFrame()
-            
-            # Convert to DataFrame
-            df = pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-            
-            # Convert timestamp to datetime
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            df.set_index('timestamp', inplace=True)
-            
-            # Ensure numeric columns
-            numeric_cols = ['open', 'high', 'low', 'close', 'volume']
-            for col in numeric_cols:
+
+            # Normalize to DataFrame
+            if isinstance(candles[0], dict):
+                # expect keys: open_time/close_time or timestamp, open high low close volume
+                df = pd.DataFrame(candles)
+                # unify timestamp
+                if 'timestamp' not in df.columns:
+                    if 'close_time' in df.columns:
+                        df['timestamp'] = df['close_time']
+                    elif 'open_time' in df.columns:
+                        df['timestamp'] = df['open_time']
+                # ensure required numeric cols exist
+                for col in ['open','high','low','close','volume']:
+                    if col not in df.columns:
+                        df[col] = pd.to_numeric(df.get(col, 0), errors='coerce').fillna(method='ffill').fillna(0)
+            else:
+                # list[list] ccxt OHLCV: [ts, o, h, l, c, v]
+                df = pd.DataFrame(candles, columns=['timestamp','open','high','low','close','volume'])
+
+            # Sort and clean
+            df = df.dropna(subset=['timestamp','close'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', errors='coerce').fillna(method='ffill')
+            for col in ['open','high','low','close','volume']:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            # Remove any NaN rows
-            df = df.dropna()
-            
-            # Sort by timestamp
-            df = df.sort_index()
-            
-            return df.tail(self.lookback_period)
-            
+            df = df.dropna().sort_values('timestamp').reset_index(drop=True)
+
+            # Return recent lookback only
+            lookback = getattr(self, 'lookback_period', 300)
+            if len(df) > lookback:
+                df = df.tail(lookback)
+
+            return df
+
         except Exception as e:
             logger.error(f"❌ Data preprocessing failed for {self.name}: {e}")
             return pd.DataFrame()
+
         
     # --- ADD INSIDE BaseStrategy (strategies/base_strategy.py) ---
     def _ensure_dataframe(self, data):

@@ -203,40 +203,48 @@ class TradingBot:
             logger.error(f"❌ Failed to generate signals: {e}")
             return []
     
+    # core/bot.py
     async def validate_signals(self, signals: List[Dict], symbol: str) -> List[TradingSignal]:
         """Validate and convert raw signals to TradingSignal objects"""
-        validated_signals = []
-        
+        validated: List[TradingSignal] = []
         try:
-            for signal_data in signals:
-                # Skip weak signals
-                if signal_data.get('confidence', 0) < config.ml.confidence_threshold:
+            for s in signals:
+                conf = float(s.get('confidence', 0.0))
+                if conf < config.ml.confidence_threshold:
+                    # (Optional) log drops here if you want: logger.info("REJECTION | ... low-confidence")
                     continue
-                
-                # Create TradingSignal object
-                signal = TradingSignal(
+
+                # Map to long/short
+                side_raw = (s.get('side') or '').lower()
+                side = 'long' if side_raw in ('long', 'buy') else 'short'
+
+                # Entry price fallback = current price
+                entry = s.get('entry_price')
+                if entry is None:
+                    entry = await self.data_collector.get_current_price(symbol)
+
+                # SL/TP passthrough (can be None; risk manager can adjust later)
+                sl = s.get('stop_loss')
+                tp = s.get('take_profit')
+
+                # Build TradingSignal
+                validated.append(TradingSignal(
                     symbol=symbol,
-                    side=signal_data['side'],
-                    confidence=signal_data['confidence'],
-                    strategy_name=signal_data['strategy'],
-                    entry_price=signal_data['entry_price'],
-                    stop_loss=signal_data.get('stop_loss', 0),
-                    take_profit=signal_data.get('take_profit', 0),
-                    position_size=signal_data.get('position_size', 0),
-                    leverage=signal_data.get('leverage', 1.0)
-                )
-                
-                # Risk validation
-                if await self.risk_manager.validate_signal(signal):
-                    validated_signals.append(signal)
-                else:
-                    logger.debug(f"🚫 Signal rejected by risk manager: {symbol} {signal.side}")
-            
-            return validated_signals
-            
+                    side=side,
+                    confidence=conf,
+                    strategy_name=s.get('strategy', 'unknown'),
+                    entry_price=float(entry) if entry is not None else 0.0,
+                    stop_loss=float(sl) if sl is not None else 0.0,
+                    take_profit=float(tp) if tp is not None else 0.0,
+                    position_size=float(s.get('position_size') or 0.0),
+                    leverage=float(s.get('leverage') or 1.0)
+                ))
+            return validated
+
         except Exception as e:
-            logger.error(f"❌ Signal validation failed: {e}")
+            logger.error(f"❌ validate_signals failed for {symbol}: {e}")
             return []
+
     
     async def process_signals(self, signals: List[TradingSignal]):
         """Process validated signals and execute trades"""

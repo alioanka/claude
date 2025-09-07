@@ -307,30 +307,36 @@ class ExchangeManager:
             if not self.is_paper_trading:
                 raise
     
+    # core/exchange_manager.py
     async def load_exchange_info(self):
         """Load exchange information and trading rules"""
         try:
-            # Fixed: Properly await the load_markets call
+            # Properly await ccxt load
             markets = await self.exchange.load_markets()
-            
             self.exchange_info = {}
-            
+
             for symbol in config.get_active_trading_pairs():
-                if symbol in markets:
-                    market = markets[symbol]
+                ex_symbol = self._to_exchange_symbol(symbol)   # <-- normalize BTCUSDT -> BTC/USDT
+
+                if ex_symbol in markets:
+                    market = markets[ex_symbol]
                     self.exchange_info[symbol] = {
                         'min_amount': market.get('limits', {}).get('amount', {}).get('min', 0.001),
                         'min_cost': market.get('limits', {}).get('cost', {}).get('min', 10.0),
                         'price_precision': market.get('precision', {}).get('price', 2),
                         'amount_precision': market.get('precision', {}).get('amount', 6),
                         'tick_size': market.get('info', {}).get('tickSize', '0.01'),
-                        'step_size': market.get('info', {}).get('stepSize', '0.001')
+                        'step_size': market.get('info', {}).get('stepSize', '0.001'),
+                        'symbol_ccxt': ex_symbol
                     }
-            
+                else:
+                    logger.debug(f"Pair {symbol} not found in exchange markets; looked for {ex_symbol}")
+
             logger.info(f"Loaded exchange info for {len(self.exchange_info)} trading pairs")
-            
+
         except Exception as e:
             logger.error(f"Failed to load exchange info: {e}")
+
     
     async def create_order(self, symbol: str, side: str, amount: float, 
                           price: Optional[float] = None, order_type: str = 'market',

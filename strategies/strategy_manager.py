@@ -142,58 +142,123 @@ class StrategyManager:
             logger.error(f"❌ Default strategy creation failed: {e}")
 
     
+    # strategies/strategy_manager.py
+    #from datetime import datetime
+
     async def generate_signals(self, symbol: str, market_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Generate trading signals from all active strategies"""
         try:
-            all_signals = []
-            
+            all_signals: List[Dict[str, Any]] = []
+
             for strategy_name, strategy in self.strategies.items():
                 if not strategy.enabled:
+                    self._log_rejection(strategy_name, symbol, "strategy disabled")
                     continue
-                
+
                 allocation = self.strategy_allocation.get(strategy_name, 0.0)
                 if allocation <= 0:
+                    self._log_rejection(strategy_name, symbol, f"allocation is {allocation}")
                     continue
-                
+
                 try:
-                    # Generate signal from strategy
+                    # 1) Ask strategy for a signal
                     signal = await strategy.analyze(symbol, market_data)
-                    
-                    if signal and signal.action != 'hold':
-                        # Convert to dict format for compatibility
-                        signal_dict = {
-                            'symbol': signal.symbol,
-                            'side': 'buy' if signal.action == 'buy' else 'sell',
-                            'confidence': signal.confidence,
-                            'strategy': signal.strategy_name,
-                            'entry_price': signal.entry_price,
-                            'stop_loss': signal.stop_loss,
-                            'take_profit': signal.take_profit,
-                            'position_size': signal.position_size,
-                            'reasoning': signal.reasoning,
-                            'allocation_weight': allocation
-                        }
-                        
-                        all_signals.append(signal_dict)
-                        
-                        # Update performance tracking
-                        self.strategy_performance[strategy_name]['signals_generated'] += 1
-                        self.strategy_performance[strategy_name]['last_signal_time'] = datetime.utcnow().isoformat()
-                        
-                        logger.debug(f"📊 Signal from {strategy_name}: {signal.action} {symbol} (confidence: {signal.confidence:.2f})")
-                
+
+                    # 2) Normalize outcomes and log WHY anything is skipped
+                    if signal is None:
+                        self._log_rejection(strategy_name, symbol, "strategy returned None")
+                        continue
+
+                    action = getattr(signal, "action", "hold")
+                    if action is None:
+                        action = "hold"
+                    action = str(action).lower()
+
+                    # Treat long/buy and short/sell equivalently here
+                    if action in ("long", "buy"):
+                        norm_side = "buy"
+                    elif action in ("short", "sell"):
+                        norm_side = "sell"
+                    else:
+                        # action == hold or anything unknown
+                        self._log_rejection(
+                            strategy_name, symbol,
+                            f"action=hold; reason={getattr(signal, 'reasoning', '')}",
+                            confidence=getattr(signal, "confidence", 0.0)
+                        )
+                        continue
+
+                    # 3) Strategy-level validation (logs details at its own level)
+                    if not strategy.validate_signal(signal, market_data):
+                        self._log_rejection(
+                            strategy_name, symbol,
+                            f"validate_signal=False (conf={getattr(signal, 'confidence', 0):.3f}, action={action})",
+                            confidence=getattr(signal, "confidence", 0.0)
+                        )
+                        continue
+
+                    # 4) Convert to dict format for the rest of the pipeline
+                    conf_val = getattr(signal, "confidence", 0.0)
+                    try:
+                        conf_val = float(conf_val)
+                    except Exception:
+                        conf_val = 0.0
+
+                    signal_dict = {
+                        "symbol": signal.symbol,
+                        "side": norm_side,  # 'buy' or 'sell'
+                        "confidence": conf_val,
+                        "strategy": getattr(signal, "strategy_name", strategy_name),
+                        "entry_price": getattr(signal, "entry_price", None),
+                        "stop_loss": getattr(signal, "stop_loss", None),
+                        "take_profit": getattr(signal, "take_profit", None),
+                        "position_size": getattr(signal, "position_size", None),
+                        "reasoning": getattr(signal, "reasoning", ""),
+                        "allocation_weight": allocation,
+                        # helpful extras for the dashboard/analytics
+                        "timeframe": getattr(signal, "timeframe", "1m"),
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+
+                    all_signals.append(signal_dict)
+
+                    # Update performance tracking
+                    self.strategy_performance[strategy_name]["signals_generated"] += 1
+                    self.strategy_performance[strategy_name]["last_signal_time"] = datetime.utcnow().isoformat()
+
+                    logger.debug(
+                        "📊 Signal from %s: %s %s (confidence: %.3f)",
+                        strategy_name, norm_side, symbol, conf_val
+                    )
+
                 except Exception as e:
-                    logger.error(f"❌ Signal generation failed for {strategy_name}: {e}")
+                    logger.error("❌ Signal generation failed for %s: %s", strategy_name, e)
                     continue
-            
+
             self.total_signals_generated += len(all_signals)
-            
             return all_signals
-            
+
         except Exception as e:
-            logger.error(f"❌ Signal generation failed for {symbol}: {e}")
+            logger.error("❌ Signal generation failed for %s: %s", symbol, e)
             return []
-    
+
+    def _log_rejection(self, strategy_name: str, symbol: str, reason: str, confidence: float | int | str = 0.0) -> None:
+        """Uniform logging for why a signal wasn't accepted/appended.
+
+        IMPORTANT: Use INFO level and a strict, parseable format so the dashboard
+        /api/rejections fallback (log parser) can display entries.
+        """
+        try:
+            conf = float(confidence)
+        except Exception:
+            conf = 0.0
+
+        # Do NOT change this prefix/shape unless you also update the dashboard parser.
+        logger.info(
+            "REJECTION | strategy=%s symbol=%s reason=%s conf=%.3f",
+            strategy_name, symbol, str(reason).strip(), conf
+        )
+
     def get_strategy_performance(self) -> Dict[str, Any]:
         """Get performance metrics for all strategies"""
         return {
