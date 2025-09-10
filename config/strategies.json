@@ -8,7 +8,15 @@
     "momentum_strategy": {
         "name": "Enhanced Momentum Strategy",
         "enabled": true,
-        "timeframes": ["15m", "1h", "4h"],
+        "timeframes": ["1m", "5m", "15m"],
+        "parameters": {
+            "ema_fast": 12,
+            "ema_slow": 26,
+            "rsi_overbought": 70,
+            "rsi_oversold": 30,
+            "min_trend_strength": 0.01,
+            "volume_multiplier": 1.5
+          },
         "indicators": {
             "ema_fast": 12,
             "ema_slow": 26,
@@ -54,7 +62,13 @@
     "mean_reversion": {
         "name": "Statistical Mean Reversion",
         "enabled": true,
-        "timeframes": ["5m", "15m", "1h"],
+        "timeframes": ["1m", "5m", "15m"],
+        "risk_weight": 1.0,
+        "parameters": {
+          "rsi_overbought": 68,
+          "rsi_oversold": 32,
+          "entry_threshold": 0.5
+        },
         "indicators": {
             "bollinger_bands": {
                 "period": 20,
@@ -70,13 +84,13 @@
         "entry_conditions": {
             "long": {
                 "price_below_lower_bb": true,
-                "rsi_oversold": 25,
+                "rsi_oversold": 32,
                 "stochastic_oversold": 20,
                 "z_score_threshold": -2
             },
             "short": {
                 "price_above_upper_bb": true,
-                "rsi_overbought": 75,
+                "rsi_overbought": 68,
                 "stochastic_overbought": 80,
                 "z_score_threshold": 2
             }
@@ -90,9 +104,11 @@
     },
     "ml_strategy": {
         "name": "Machine Learning Ensemble",
-        "enabled": true,
+        "enabled": false,
         "model_dir": "storage/models",
         "confidence_threshold": 0.55,
+        "timeframes": ["1m", "5m", "15m"],
+        "risk_weight": 1.0,
         "models": {
             "xgboost": {
                 "enabled": true,
@@ -137,14 +153,21 @@
     "arbitrage_strategy": {
         "name": "Statistical Arbitrage",
         "enabled": true,
+        "timeframes": ["1m"],
+        "risk_weight": 0.5,
+        "parameters": {
+          "min_spread_threshold": 0.001,
+          "transaction_cost": 0.0005,
+          "lookback_period": 100
+        },
         "pairs": [
             ["BTCUSDT", "ETHUSDT"],
-            ["ADAUSDT", "DOTUSDT"],
+            ["ADAUSDT", "SOLUSDT"],
             ["LINKUSDT", "AVAXUSDT"]
         ],
         "correlation_threshold": 0.8,
-        "spread_threshold": 0.02,
-        "lookback_period": 50,
+        "spread_threshold": 0.001,
+        "lookback_period": 100,
         "z_score_entry": 2.0,
         "z_score_exit": 0.5,
         "max_holding_time": 120

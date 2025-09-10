@@ -343,7 +343,7 @@ class DataCollector:
                 try:
                     for symbol in TRADING_PAIRS:
                         # Get latest candles for primary timeframes
-                        for timeframe in ['1m', '5m']:  # Most important timeframes
+                        for timeframe in ['1m', '5m', '15m', '1h']:  # Most important timeframes
                             try:
                                 candles = await self.exchange_manager.get_ohlcv(
                                     symbol, timeframe, limit=2

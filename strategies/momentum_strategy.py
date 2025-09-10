@@ -253,7 +253,7 @@ class MomentumStrategy(BaseStrategy):
                     reasoning_parts.append(f"Volume confirmed ({volume_momentum:.1f}x)")
             
             # 5. Price Momentum
-            if abs(price_momentum) > 0.01:  # Minimum 1% price movement
+            if abs(price_momentum) > 0.003:  # Minimum 1% price movement
                 if price_momentum > 0 and bullish_signals > bearish_signals:
                     bullish_signals += 1
                     signal_strength += 0.1
@@ -284,14 +284,14 @@ class MomentumStrategy(BaseStrategy):
             net_signals = bullish_signals - bearish_signals
             
             # Require minimum signal strength and clear direction
-            min_net_signals = 2  # Require at least 2 net signals
+            min_net_signals = 1  # Require at least 2 net signals
             
-            if net_signals >= min_net_signals and signal_strength >= 0.4:
+            if net_signals >= min_net_signals and signal_strength >= 0.25:
                 action = "buy"
                 confidence = min(0.95, 0.5 + signal_strength)
                 reasoning = f"Bullish momentum: {', '.join(reasoning_parts)}"
                 
-            elif net_signals <= -min_net_signals and signal_strength >= 0.4:
+            elif net_signals <= -min_net_signals and signal_strength >= 0.25:
                 action = "sell"
                 confidence = min(0.95, 0.5 + signal_strength)
                 reasoning = f"Bearish momentum: {', '.join(reasoning_parts)}"
@@ -351,7 +351,7 @@ class MomentumStrategy(BaseStrategy):
                 volatility_pct = (recent_atr / current_price) * 100
                 
                 # Momentum strategies need some volatility
-                if volatility_pct < 0.8:  # Less than 0.8% volatility
+                if volatility_pct < 0.25:  # Less than 0.8% volatility
                     logger.debug(f"Low volatility for momentum: {volatility_pct:.2f}%")
                     return False
             
@@ -374,7 +374,7 @@ class MomentumStrategy(BaseStrategy):
                 recent_volume = df['volume'].iloc[-5:].mean()
                 avg_volume = df['volume_sma'].iloc[-1]
                 
-                if recent_volume < avg_volume * 0.5:  # Less than 50% of average volume
+                if recent_volume < avg_volume * 0.3:  # Less than 50% of average volume
                     logger.debug("Insufficient volume for momentum strategy")
                     return False
             

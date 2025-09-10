@@ -73,7 +73,7 @@ class BaseStrategy(ABC):
         
         # Strategy configuration
         self.enabled = True
-        self.min_confidence = 0.6
+        self.min_confidence = 0.5
         self.max_positions = 1  # Maximum positions per symbol
         self.lookback_period = 100  # Number of candles to analyze
         

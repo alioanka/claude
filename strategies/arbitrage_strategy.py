@@ -56,18 +56,28 @@ class ArbitrageStrategy(BaseStrategy):
     def _initialize_exchanges(self):
         """Initialize exchange connections"""
         try:
+         
             exchange_configs = self.config.get('exchanges', {})
+            # Fallback to public price clients if strategy config doesn’t provide exchanges
+            if not exchange_configs:
+                exchange_configs = {
+                    'binance': {'enabled': True, 'sandbox': True},
+                    'kucoin':  {'enabled': True, 'sandbox': True},
+                    'bybit':   {'enabled': True, 'sandbox': True},
+                }
             
             for exchange_name, config in exchange_configs.items():
                 if config.get('enabled', False):
                     exchange_class = getattr(ccxt, exchange_name)
                     self.exchanges[exchange_name] = exchange_class({
+                        'enableRateLimit': True,
+                        # API keys optional for public price data:
                         'apiKey': config.get('api_key', ''),
                         'secret': config.get('secret', ''),
-                        'sandbox': config.get('sandbox', True),
-                        'enableRateLimit': True
+                        'options': {'defaultType': 'spot'},
                     })
                     logger.info(f"Initialized exchange: {exchange_name}")
+
                     
         except Exception as e:
             logger.error(f"Exchange initialization failed: {e}")

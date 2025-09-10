@@ -112,7 +112,9 @@ class StrategyManager:
                 logger.info("✅ Mean Reversion Strategy loaded")
 
             # Initialize Arbitrage Strategy (if allocated)
-            if 'arbitrage_strategy' in self.strategy_allocation:
+            if 'arbitrage_strategy' in self.strategy_allocation and (
+                hasattr(config, 'strategies') and config.strategies.get('arbitrage_strategy', {}).get('enabled', True)
+            ):
                 arb_params = {}
                 if hasattr(config, 'strategies') and 'arbitrage_strategy' in getattr(config, 'strategies', {}):
                     arb_params = config.strategies['arbitrage_strategy'].get('parameters', {})
@@ -121,12 +123,15 @@ class StrategyManager:
 
 
             # Initialize ML Strategy (config-driven)
-            if 'ml_strategy' in self.strategy_allocation:
+            if 'ml_strategy' in self.strategy_allocation and (
+                hasattr(config, 'strategies') and config.strategies.get('ml_strategy', {}).get('enabled', True)
+            ):
                 ml_params = {}
                 if hasattr(config, 'strategies') and 'ml_strategy' in getattr(config, 'strategies', {}):
                     ml_params = config.strategies['ml_strategy']
                 self.strategies['ml_strategy'] = MLStrategy(ml_params)
                 logger.info("✅ ML Strategy loaded")
+
 
             
         except Exception as e:

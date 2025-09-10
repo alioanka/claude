@@ -314,7 +314,7 @@ class MeanReversionStrategy(BaseStrategy):
                     reasoning_parts.append("At recent resistance")
             
             # Determine final signal
-            min_score = 4  # Minimum score required for signal
+            min_score = 3  # Minimum score required for signal
             net_score = buy_score - sell_score
             
             if buy_score >= min_score and net_score >= 2:
