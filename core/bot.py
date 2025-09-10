@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from config.config import config, TRADING_PAIRS
 from core.exchange_manager import ExchangeManager
 from core.portfolio_manager import PortfolioManager
-from core.trade_executor import TradeExecutor
+from core.trade_executor import TradeExecutor, TradeSignal as ExecTradeSignal, ExecutionResult
 from data.data_collector import DataCollector
 from strategies.strategy_manager import StrategyManager
 from risk.risk_manager import RiskManager
@@ -286,28 +286,43 @@ class TradingBot:
                     if position_size <= 0:
                         continue
                     
-                    # Update signal with calculated position size
+                    # Update signal with calculated position size (in UNITS)
                     signal.position_size = position_size
-                    
-                    # Execute the trade
-                    trade_result = await self.trade_executor.execute_signal(signal)
-                    
-                    if trade_result['success']:
+
+                    # Map long/short -> buy/sell and build executor signal
+                    exec_side = 'buy' if str(signal.side).lower() in ('long', 'buy') else 'sell'
+                    exec_signal = ExecTradeSignal(
+                        symbol=signal.symbol,
+                        side=exec_side,
+                        amount=signal.position_size,        # executor expects 'amount'
+                        confidence=signal.confidence,
+                        strategy_name=signal.strategy_name,
+                        entry_price=signal.entry_price,
+                        stop_loss=signal.stop_loss,
+                        take_profit=signal.take_profit,
+                        leverage=getattr(signal, 'leverage', 1.0),
+                    )
+
+                    # Execute the trade with the executor dataclass
+                    trade_result: ExecutionResult = await self.trade_executor.execute_signal(exec_signal)
+
+                    if trade_result.success:
                         # Store active signal
                         self.active_signals[signal.symbol] = signal
-                        
+
                         # Update trading stats
                         self.trading_stats['total_trades'] += 1
-                        
+
                         logger.info(
-                            f"✅ Trade executed: {signal.symbol} {signal.side} "
-                            f"${position_size:.2f} @ {signal.entry_price:.4f}"
+                            f"✅ Trade executed: {signal.symbol} {exec_side} "
+                            f"{trade_result.executed_amount:.6f} @ {trade_result.executed_price:.4f}"
                         )
                     else:
                         logger.warning(
                             f"⚠️ Trade execution failed: {signal.symbol} - "
-                            f"{trade_result.get('error', 'Unknown error')}"
+                            f"{trade_result.error_message or 'Unknown error'}"
                         )
+
                         
                 except Exception as e:
                     logger.error(f"❌ Failed to process signal for {signal.symbol}: {e}")
