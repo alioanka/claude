@@ -197,8 +197,21 @@ class TradeExecutor:
             
             # Check minimum order size
             current_price = await self.exchange_manager.get_current_price(signal.symbol)
+
+            # Paper-mode fallback: use the signal's entry_price if price feed is momentarily unavailable
+            try:
+                trading_mode = getattr(getattr(config, 'trading', None), 'mode', 'paper')
+            except Exception:
+                trading_mode = 'paper'
+
+            if (not current_price) and str(trading_mode).lower() == 'paper':
+                if getattr(signal, 'entry_price', None):
+                    current_price = float(signal.entry_price)
+                    logger.debug(f"ℹ️ Using signal.entry_price as paper fallback for {signal.symbol}: {current_price}")
+
             if not current_price:
                 return {'valid': False, 'reason': f'Cannot get price for {signal.symbol}'}
+
             
             order_value = signal.amount * current_price
             if order_value < self.min_order_size:

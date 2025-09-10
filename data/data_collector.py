@@ -53,8 +53,9 @@ class MarketData:
         if '1m' in self.ohlcv and self.ohlcv['1m']:
             return self.ohlcv['1m'][-1]['close']
         elif self.ticker:
-            return self.ticker.get('last')
+            return self.ticker.get('last') or self.ticker.get('last_price')
         return None
+
 
 class DataCollector:
     """Main data collection and management class"""
@@ -344,8 +345,11 @@ class DataCollector:
                 'high': float(data.get('h', 0)),
                 'low': float(data.get('l', 0))
             }
+            # 🔧 provide 'last' alias for any callers expecting it
+            ticker['last'] = ticker['last_price']
             
             self.market_data[symbol].ticker = ticker
+
             
         except Exception as e:
             logger.error(f"❌ Ticker data processing error: {e}")

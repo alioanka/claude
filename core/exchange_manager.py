@@ -230,9 +230,15 @@ class ExchangeManager:
             'enableRateLimit': True,
             'timeout': config.exchange.timeout
         })
+
+        # 🔧 Share exchange, limiter, and symbol normalizer with the paper engine
+        self.paper_engine.exchange = self.exchange
+        self.paper_engine.rate_limiter = self.rate_limiter
+        self.paper_engine._to_exchange_symbol = self._to_exchange_symbol
         
         # Test connection
         await self.test_connection()
+
     
     async def initialize_live_trading(self):
         """Initialize live trading mode"""
@@ -484,25 +490,34 @@ class ExchangeManager:
             return []
     
     async def get_current_price(self, symbol: str) -> Optional[float]:
-        """Get current market price for a symbol"""
+        """Get current market price for a symbol (normalized for ccxt in all modes)"""
         try:
-            if self.is_paper_trading:
-                return await self.paper_engine.get_market_price(symbol)
-            else:
-                async with self.rate_limiter:
-                    ticker = await self.exchange.fetch_ticker(symbol)
-                    return ticker.get('last')
-                    
+            ex_symbol = self._to_exchange_symbol(symbol)
+            async with self.rate_limiter:
+                ticker = await self.exchange.fetch_ticker(ex_symbol)
+                price = ticker.get('last') or (
+                    ((ticker.get('bid') or 0) + (ticker.get('ask') or 0)) / 2 if ticker else 0
+                )
+                return float(price) if price else None
         except Exception as e:
             logger.error(f"Failed to get current price for {symbol}: {e}")
+            # Paper fallback via the paper engine mock as last resort
+            if self.is_paper_trading and hasattr(self, "paper_engine"):
+                try:
+                    return await self.paper_engine.get_market_price(symbol)
+                except Exception:
+                    pass
             return None
+
     
     async def get_order_book(self, symbol: str, limit: int = 100) -> Optional[Dict]:
         """Get order book data"""
         try:
+            ex_symbol = self._to_exchange_symbol(symbol)
             async with self.rate_limiter:
-                order_book = await self.exchange.fetch_order_book(symbol, limit)
+                order_book = await self.exchange.fetch_order_book(ex_symbol, limit)
                 return order_book
+
                 
         except Exception as e:
             logger.error(f"Failed to get order book for {symbol}: {e}")
@@ -511,9 +526,11 @@ class ExchangeManager:
     async def get_recent_trades(self, symbol: str, limit: int = 100) -> List[Dict]:
         """Get recent trades"""
         try:
+            ex_symbol = self._to_exchange_symbol(symbol)
             async with self.rate_limiter:
-                trades = await self.exchange.fetch_trades(symbol, limit=limit)
+                trades = await self.exchange.fetch_trades(ex_symbol, limit=limit)
                 return trades
+
                 
         except Exception as e:
             logger.error(f"Failed to get recent trades for {symbol}: {e}")

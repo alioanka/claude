@@ -318,10 +318,27 @@ class TradingBot:
                             f"{trade_result.executed_amount:.6f} @ {trade_result.executed_price:.4f}"
                         )
                     else:
-                        logger.warning(
-                            f"⚠️ Trade execution failed: {signal.symbol} - "
-                            f"{trade_result.error_message or 'Unknown error'}"
-                        )
+                        err_msg = getattr(trade_result, 'error_message', None)
+                        if err_msg is None and isinstance(trade_result, dict):
+                            err_msg = trade_result.get('error', 'Unknown error')
+                        err_msg = err_msg or 'Unknown error'
+
+                        logger.warning(f"⚠️ Trade execution failed: {signal.symbol} - {err_msg}")
+                        # also log to errors.log (if your handler captures ERROR and above)
+                        logger.error(f"❌ Execution failed: {signal.symbol} - {err_msg}")
+
+                        # Mirror to dashboard’s “Recent Rejections” feed (it parses this exact format)
+                        try:
+                            if self.strategy_manager:
+                                self.strategy_manager._log_rejection(
+                                    strategy_name=(signal.strategy_name or 'trade_executor'),
+                                    symbol=signal.symbol,
+                                    reason=f"Execution failed: {err_msg}",
+                                    confidence=(signal.confidence or 0.0)
+                                )
+                        except Exception as e:
+                            logger.debug(f"Failed to log execution failure to dashboard: {e}")
+
 
                         
                 except Exception as e:

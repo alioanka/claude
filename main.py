@@ -383,7 +383,7 @@ if __name__ == "__main__":
     # Print startup banner
     print("""
     ╔═══════════════════════════════════════╗
-    ║        🚀 CRYPTO TRADING BOT 🚀        ║
+    ║        🚀 CRYPTO TRADING BOT 🚀      ║
     ║                                       ║
     ║  Advanced ML-Powered Trading System   ║
     ║        Built for Performance          ║
