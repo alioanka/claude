@@ -114,10 +114,26 @@ class DataCollector:
             for symbol in TRADING_PAIRS:
                 for timeframe in TIMEFRAMES:
                     try:
-                        # Get last 500 candles
+                        # Choose sensible backfill per timeframe without breaking dynamic TIMEFRAMES
+                        tf = str(timeframe).lower()
+                        limit = 500
+                        try:
+                            if tf.endswith('m'):
+                                n = int(tf[:-1])
+                                # deeper backfill for faster timeframes
+                                limit = 1200 if n <= 5 else 800
+                            elif tf.endswith('h'):
+                                n = int(tf[:-1])
+                                limit = 720 if n == 1 else 365
+                            elif tf.endswith('d'):
+                                limit = 120
+                        except Exception:
+                            limit = 500
+
                         candles = await self.exchange_manager.get_ohlcv(
-                            symbol, timeframe, limit=500
+                            symbol, timeframe, limit=limit
                         )
+
                         
                         if candles:
                             # Store in market data
@@ -192,7 +208,7 @@ class DataCollector:
             for symbol in TRADING_PAIRS:
                 symbol_lower = symbol.lower()
                 # Kline streams for different timeframes
-                for timeframe in ['1m', '5m', '15m', '1h', '4h']:
+                for timeframe in TIMEFRAMES:
                     streams.append(f"{symbol_lower}@kline_{timeframe}")
                 
                 # Trade stream
@@ -343,7 +359,7 @@ class DataCollector:
                 try:
                     for symbol in TRADING_PAIRS:
                         # Get latest candles for primary timeframes
-                        for timeframe in ['1m', '5m', '15m', '1h']:  # Most important timeframes
+                        for timeframe in TIMEFRAMES:  # Most important timeframes
                             try:
                                 candles = await self.exchange_manager.get_ohlcv(
                                     symbol, timeframe, limit=2

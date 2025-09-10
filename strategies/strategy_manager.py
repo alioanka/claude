@@ -73,7 +73,18 @@ class StrategyManager:
             
             # Initialize available strategies
             await self.load_strategies()
-            
+            # Normalize allocation over loaded & enabled strategies (so 0.0 weights don't block everything)
+            active_names = [name for name, strat in self.strategies.items() if getattr(strat, "enabled", True)]
+            total_alloc = sum(max(0.0, float(self.strategy_allocation.get(n, 0.0))) for n in active_names)
+            if total_alloc <= 0 and active_names:
+                # fallback: equal weight
+                equal = round(1.0 / len(active_names), 6)
+                self.strategy_allocation = {n: equal for n in active_names}
+                logger.info(f"⚖️ Strategy allocation normalized to equal weights: {self.strategy_allocation}")
+            elif active_names:
+                self.strategy_allocation = {n: float(self.strategy_allocation.get(n, 0.0))/total_alloc for n in active_names}
+                logger.info(f"⚖️ Strategy allocation normalized: {self.strategy_allocation}")
+                    
             # Set initial performance metrics
             for strategy_name in self.strategies:
                 self.strategy_performance[strategy_name] = {
@@ -186,12 +197,27 @@ class StrategyManager:
                         norm_side = "sell"
                     else:
                         # action == hold or anything unknown
+                        # action == hold or anything unknown
+                        # Keep the shape: reason=<string>; enrich with compact details if present
+                        try:
+                            _detail = getattr(signal, "detail", None)
+                            if isinstance(_detail, dict):
+                                # pick a few simple keys if available
+                                keys = [k for k in ("timeframe","bars","vol","avg_vol","atr","spread","z") if k in _detail][:4]
+                                extra = "; ".join(f"{k}={_detail[k]}" for k in keys)
+                                reason_txt = f"action=hold; reason={getattr(signal, 'reasoning', '')}; {extra}" if extra else f"action=hold; reason={getattr(signal, 'reasoning', '')}"
+                            else:
+                                reason_txt = f"action=hold; reason={getattr(signal, 'reasoning', '')}"
+                        except Exception:
+                            reason_txt = f"action=hold; reason={getattr(signal, 'reasoning', '')}"
+
                         self._log_rejection(
                             strategy_name, symbol,
-                            f"action=hold; reason={getattr(signal, 'reasoning', '')}",
+                            reason_txt,
                             confidence=getattr(signal, "confidence", 0.0)
                         )
                         continue
+
 
                     # 3) Strategy-level validation (logs details at its own level)
                     if not strategy.validate_signal(signal, market_data):
