@@ -82,7 +82,7 @@ class MeanReversionStrategy(BaseStrategy):
                 detail = {
                     "bars": len(df),
                     "rsi": round(float(df['rsi'].iloc[-1]), 2) if 'rsi' in df.columns else None,
-                    "z": round(float(z_score.iloc[-1]), 2) if 'z_score' in locals() else None,
+                    "z": round(float(df['z_score'].iloc[-1]), 2) if 'z_score' in df.columns else None,
                     "bb_width": round(float((df['bb_upper'] - df['bb_lower']).iloc[-1] / df['close'].iloc[-1] * 100), 3)
                             if 'bb_upper' in df.columns and 'bb_lower' in df.columns else None,
                     "atr": round(float(df['atr'].iloc[-1]), 6) if 'atr' in df.columns else None
@@ -388,10 +388,11 @@ class MeanReversionStrategy(BaseStrategy):
             logger.error(f"❌ Signal generation failed: {e}")
             return self._no_signal(symbol, f"Signal generation error: {e}")
     
-    def _no_signal(self, symbol: str, reason: str) -> StrategySignal:
-        """Generate no-action signal"""
-        return super()._no_signal(symbol, reason, detail=getattr(self, "_last_detail", {}) or {})
-    
+   def _no_signal(self, symbol: str, reason: str, detail: dict | None = None) -> StrategySignal:
+        """Generate no-action signal (propagate detail to base)"""
+        if detail is None:
+            detail = getattr(self, "_last_detail", {}) or {}
+        return super()._no_signal(symbol, reason, detail=detail)
     def is_market_condition_suitable(self, df: pd.DataFrame) -> bool:
         """Check if market conditions are suitable for mean reversion"""
         return self._is_suitable_for_mean_reversion(df)

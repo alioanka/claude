@@ -333,10 +333,11 @@ class MomentumStrategy(BaseStrategy):
             logger.error(f"❌ Signal generation failed: {e}")
             return self._no_signal(symbol, f"Signal generation error: {e}")
     
-    def _no_signal(self, symbol: str, reason: str) -> StrategySignal:
-        """Generate no-action signal"""
-        return super()._no_signal(symbol, reason, detail=getattr(self, "_last_detail", {}) or {})
-
+    def _no_signal(self, symbol: str, reason: str, detail: dict | None = None) -> StrategySignal:
+        """Generate no-action signal (propagate detail to base)"""
+        if detail is None:
+            detail = getattr(self, "_last_detail", {}) or {}
+        return super()._no_signal(symbol, reason, detail=detail)
     
     def is_market_condition_suitable(self, df: pd.DataFrame) -> bool:
         """Check if market conditions are suitable for momentum strategy"""
