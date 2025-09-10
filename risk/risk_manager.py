@@ -43,6 +43,24 @@ class RiskManager:
         self.risk_events = []
         self.blocked_signals = 0
         self.total_signals_checked = 0
+
+    def _safe_action(self, signal) -> str:
+        """
+        Try multiple common fields to infer signal action.
+        Returns 'buy' | 'sell' | 'hold' | ''.
+        """
+        val = (getattr(signal, "action", None)
+               or getattr(signal, "side", None)
+               or getattr(signal, "direction", None)
+               or "")
+        val = str(val).lower()
+        if val in ("buy", "long"):
+            return "buy"
+        if val in ("sell", "short"):
+            return "sell"
+        if val in ("hold", "flat", "none", ""):
+            return "hold" if val else ""
+        return ""
     
     async def validate_signal(self, signal) -> bool:
         """Validate trading signal against risk rules (pre-sizing)"""
@@ -111,7 +129,7 @@ class RiskManager:
         if not hasattr(signal, 'entry_price') or not signal.entry_price:
             return True
         
-        position_value = signal.position_size * signal.entry_price
+        position_value = (getattr(signal, 'position_size', 0.0) or 0.0) * signal.entry_price
         max_position_value = total_balance * (self.risk_limits['max_position_size_percent'] / 100)
         
         if position_value > max_position_value:
@@ -124,7 +142,7 @@ class RiskManager:
         if not hasattr(signal, 'entry_price') or not signal.entry_price:
             return True
         
-        required_balance = signal.position_size * signal.entry_price
+        required_balance = (getattr(signal, 'position_size', 0.0) or 0.0) * signal.entry_price
         
         if required_balance > available_balance:
             logger.debug(f"Required balance ${required_balance:.2f} exceeds available ${available_balance:.2f}")
@@ -141,7 +159,9 @@ class RiskManager:
             new_position_value = 0
             
             if hasattr(signal, 'entry_price') and signal.entry_price:
-                new_position_value = signal.position_size * signal.entry_price
+                size = getattr(signal, 'position_size', 0.0) or 0.0
+                new_position_value = size * signal.entry_price
+
             
             total_exposure = current_exposure + new_position_value
             max_exposure = total_balance * (self.risk_limits['max_total_exposure_percent'] / 100)
@@ -208,59 +228,62 @@ class RiskManager:
     async def calculate_position_size(self, signal, available_balance: float) -> float:
         """Calculate optimal position size"""
         try:
-            if not hasattr(signal, 'entry_price') or not signal.entry_price:
+            # Must have an entry price to size anything
+            entry = float(signal.entry_price) if hasattr(signal, 'entry_price') and signal.entry_price else 0.0
+            if entry <= 0:
                 return 0.0
-            
-            # Get portfolio balance
-            if self.portfolio_manager:
-                portfolio_value = self.portfolio_manager.get_total_balance()
+
+            # Portfolio context
+            portfolio_value = (self.portfolio_manager.get_total_balance()
+                               if self.portfolio_manager else float(available_balance or 0.0))
+            portfolio_value = max(0.0, float(portfolio_value))
+
+            # Base risk (e.g., 2% of portfolio)
+            base_risk = portfolio_value * float(getattr(config.trading, "risk_per_trade", 0.02) or 0.02)
+
+            # Stop distance (absolute if stop provided; else 3% of entry)
+            stop_distance = 0.0
+            stop = getattr(signal, 'stop_loss', None)
+            if stop:
+                try:
+                    stop = float(stop)
+                except Exception:
+                    stop = None
+
+            if stop and stop > 0:
+                stop_distance = abs(entry - stop)
             else:
-                portfolio_value = available_balance
-            
-            # Base position size (2% of portfolio risk)
-            base_risk = portfolio_value * config.trading.risk_per_trade
-            
-            # Calculate stop distance
-            stop_distance = 0
-            if hasattr(signal, 'stop_loss') and signal.stop_loss:
-                if signal.action == 'buy':
-                    stop_distance = signal.entry_price - signal.stop_loss
-                elif signal.action == 'sell':
-                    stop_distance = signal.stop_loss - signal.entry_price
-            else:
-                # Default 3% stop loss
-                stop_distance = signal.entry_price * 0.03
-            
+                stop_distance = entry * 0.03  # default 3%
+
             if stop_distance <= 0:
-                stop_distance = signal.entry_price * 0.03
-            
-            # Position size = Risk Amount / Stop Distance
+                stop_distance = entry * 0.03
+
+            # Initial size: Risk / StopDistance
             position_size = base_risk / stop_distance
-            
-            # Apply confidence scaling if available
-            if hasattr(signal, 'confidence'):
-                confidence_multiplier = max(0.5, signal.confidence)  # Minimum 50%
-                position_size *= confidence_multiplier
-            
-            # Ensure position size limits
-            max_position_value = portfolio_value * (self.risk_limits['max_position_size_percent'] / 100)
-            max_position_size = max_position_value / signal.entry_price
-            
+
+            # Confidence scaling (min 0.5×)
+            conf = float(getattr(signal, 'confidence', 1.0) or 1.0)
+            position_size *= max(0.5, conf)
+
+            # Respect per-position max
+            max_position_value = portfolio_value * (self.risk_limits['max_position_size_percent'] / 100.0)
+            max_position_size = max_position_value / entry if entry > 0 else 0.0
             position_size = min(position_size, max_position_size)
-            
-            # Ensure minimum position size
-            min_size_by_value = self.risk_limits['min_position_size_usd'] / signal.entry_price
+
+            # Respect minimum position size in USD
+            min_size_by_value = self.risk_limits['min_position_size_usd'] / entry if entry > 0 else 0.0
             position_size = max(position_size, min_size_by_value)
-            
-            # Ensure we don't exceed available balance
-            max_affordable = (available_balance * 0.95) / signal.entry_price  # Leave 5% buffer
+
+            # Don’t exceed available cash
+            max_affordable = ((available_balance or 0.0) * 0.95) / entry if entry > 0 else 0.0
             position_size = min(position_size, max_affordable)
-            
-            return max(0, position_size)
-            
+
+            return max(0.0, float(position_size))
+
         except Exception as e:
             logger.error(f"❌ Position size calculation error: {e}")
             return 0.0
+
     
     def get_risk_metrics(self) -> Dict[str, Any]:
         """Get current risk metrics"""
