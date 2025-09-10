@@ -388,7 +388,7 @@ class MeanReversionStrategy(BaseStrategy):
             logger.error(f"❌ Signal generation failed: {e}")
             return self._no_signal(symbol, f"Signal generation error: {e}")
     
-   def _no_signal(self, symbol: str, reason: str, detail: dict | None = None) -> StrategySignal:
+    def _no_signal(self, symbol: str, reason: str, detail: dict | None = None) -> StrategySignal:
         """Generate no-action signal (propagate detail to base)"""
         if detail is None:
             detail = getattr(self, "_last_detail", {}) or {}
