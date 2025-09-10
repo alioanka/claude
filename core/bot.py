@@ -210,9 +210,26 @@ class TradingBot:
         try:
             for s in signals:
                 conf = float(s.get('confidence', 0.0))
-                if conf < config.ml.confidence_threshold:
-                    # (Optional) log drops here if you want: logger.info("REJECTION | ... low-confidence")
+                strategy_name = (s.get('strategy') or s.get('strategy_name') or "").lower()
+
+                # Per-signal override (optional)
+                per_signal_min = s.get('min_confidence')
+                if isinstance(per_signal_min, (int, float)):
+                    min_conf = float(per_signal_min)
+                else:
+                    is_ml = strategy_name in ("ml_strategy", "ml", "model")
+                    if is_ml:
+                        min_conf = getattr(config.thresholds, "ml_confidence_threshold", config.ml.confidence_threshold)
+                    else:
+                        min_conf = getattr(config.thresholds, "non_ml_confidence_threshold",
+                                        min(0.5, config.ml.confidence_threshold))  # sane fallback
+
+                if conf < min_conf:
+                    # Rich rejection for dashboard/log parsers
+                    logger.info("REJECTION | strategy=%s symbol=%s reason=low-confidence(%.3f<%.3f) conf=%.3f",
+                                strategy_name or "unknown", symbol, conf, min_conf, conf)
                     continue
+
 
                 # Map to long/short
                 side_raw = (s.get('side') or '').lower()

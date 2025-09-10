@@ -71,9 +71,9 @@ ml:
 # Strategy Configuration
 strategies:
   strategy_allocation:
-    momentum_strategy: 0.30
-    mean_reversion: 0.25
-    ml_strategy: 0.35
+    momentum_strategy: 0.45
+    mean_reversion: 0.45
+    ml_strategy: 0.0
     arbitrage_strategy: 0.10
   mean_reversion:
     enabled: true

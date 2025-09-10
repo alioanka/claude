@@ -64,14 +64,16 @@ class MomentumStrategy(BaseStrategy):
             # Preprocess data
             df = self.preprocess_data(market_data)
             if df.empty or len(df) < self.parameters['ema_slow']:
-                return self._no_signal(symbol, "Insufficient data")
+                return self._no_signal(symbol, "Insufficient data",
+                                    detail={"bars": len(df)})
             
             # Calculate indicators
             df = self._calculate_momentum_indicators(df)
             
             # Check if market conditions are suitable
             if not self.is_market_condition_suitable(df):
-                return self._no_signal(symbol, "Unsuitable market conditions")
+                return self._no_signal(symbol, "Unsuitable market conditions",
+                                    detail=getattr(self, "_last_detail", {}))
             
             # Generate signal
             signal = self._generate_momentum_signal(symbol, df)
@@ -313,7 +315,8 @@ class MomentumStrategy(BaseStrategy):
             # Cap confidence
             confidence = min(0.98, confidence)
             
-            return StrategySignal(
+            detail = getattr(self, "_last_detail", {}) or {}
+            signal = StrategySignal(
                 symbol=symbol,
                 action=action,
                 confidence=confidence,
@@ -322,6 +325,9 @@ class MomentumStrategy(BaseStrategy):
                 timeframe=self.timeframes[0],
                 strategy_name=self.name
             )
+            setattr(signal, "detail", detail)
+            return signal
+
             
         except Exception as e:
             logger.error(f"❌ Signal generation failed: {e}")
@@ -329,61 +335,47 @@ class MomentumStrategy(BaseStrategy):
     
     def _no_signal(self, symbol: str, reason: str) -> StrategySignal:
         """Generate no-action signal"""
-        return StrategySignal(
-            symbol=symbol,
-            action="hold",
-            confidence=0.0,
-            reasoning=reason,
-            timeframe=self.timeframes[0],
-            strategy_name=self.name
-        )
+        return super()._no_signal(symbol, reason, detail=getattr(self, "_last_detail", {}) or {})
+
     
     def is_market_condition_suitable(self, df: pd.DataFrame) -> bool:
         """Check if market conditions are suitable for momentum strategy"""
         try:
-            if df.empty or len(df) < 20:
+            if df.empty or len(df) < 50:
+                self._last_detail = {"bars": len(df)}
                 return False
-            
-            # Check for sufficient volatility
-            if 'atr' in df.columns:
-                recent_atr = df['atr'].iloc[-5:].mean()
-                current_price = df['close'].iloc[-1]
-                volatility_pct = (recent_atr / current_price) * 100
-                
-                # Momentum strategies need some volatility
-                if volatility_pct < 0.25:  # Less than 0.8% volatility
-                    logger.debug(f"Low volatility for momentum: {volatility_pct:.2f}%")
-                    return False
-            
-            # Check for trending conditions
-            if f'ema_{self.parameters["ema_fast"]}' in df.columns and f'ema_{self.parameters["ema_slow"]}' in df.columns:
-                ema_fast = df[f'ema_{self.parameters["ema_fast"]}'].iloc[-10:]
-                ema_slow = df[f'ema_{self.parameters["ema_slow"]}'].iloc[-10:]
-                
-                # Calculate trend consistency
-                fast_trend = (ema_fast.iloc[-1] - ema_fast.iloc[0]) / ema_fast.iloc[0]
-                slow_trend = (ema_slow.iloc[-1] - ema_slow.iloc[0]) / ema_slow.iloc[0]
-                
-                # Both EMAs should be trending in same direction for momentum
-                if abs(fast_trend) < 0.01 and abs(slow_trend) < 0.01:
-                    logger.debug("Market not trending enough for momentum strategy")
-                    return False
-            
-            # Check for sufficient volume
-            if 'volume_sma' in df.columns:
-                recent_volume = df['volume'].iloc[-5:].mean()
-                avg_volume = df['volume_sma'].iloc[-1]
-                
-                if recent_volume < avg_volume * 0.3:  # Less than 50% of average volume
-                    logger.debug("Insufficient volume for momentum strategy")
-                    return False
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Market condition check failed: {e}")
+
+            # ATR-based realized vol in %
+            recent_atr = float(df['atr'].iloc[-5:].mean()) if 'atr' in df.columns else None
+            current_price = float(df['close'].iloc[-1])
+            vol_pct = (recent_atr / current_price) * 100 if recent_atr and current_price else None
+
+            # EMA slope consistency over last 10 bars
+            ema_fast = df.get(f'ema_{self.parameters["ema_fast"]}')
+            ema_slow = df.get(f'ema_{self.parameters["ema_slow"]}')
+            trend = None
+            if ema_fast is not None and ema_slow is not None:
+                fast_up = (ema_fast.diff().iloc[-10:] > 0).sum()
+                slow_up = (ema_slow.diff().iloc[-10:] > 0).sum()
+                trend = f"fast_up:{fast_up}/10 slow_up:{slow_up}/10"
+
+            # Thresholds (relaxed)
+            vol_ok = (vol_pct is None) or (vol_pct >= 0.15)  # was ~0.25; now 0.15%
+            trend_ok = True
+            if ema_fast is not None and ema_slow is not None:
+                trend_ok = (ema_fast.iloc[-1] > ema_slow.iloc[-1]) or (ema_fast.iloc[-1] < ema_slow.iloc[-1])
+
+            self._last_detail = {
+                "bars": len(df),
+                "atr": round(recent_atr, 6) if recent_atr else None,
+                "vol": round(vol_pct, 4) if vol_pct is not None else None,
+                "trend": trend
+            }
+            return bool(vol_ok and trend_ok)
+        except Exception:
+            self._last_detail = {"bars": len(df) if not df.empty else 0}
             return False
-    
+   
     def set_stop_loss_take_profit(self, signal: StrategySignal) -> StrategySignal:
         """Set dynamic stop loss and take profit based on volatility"""
         try:

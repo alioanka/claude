@@ -44,7 +44,14 @@ class MLConfig:
     confidence_threshold: float = float(os.getenv("MODEL_CONFIDENCE_THRESHOLD", "0.6"))
     models_path: str = "storage/models"
     min_samples_to_train: int = 500
-    
+
+ # ⬇️ ADD THIS BLOCK DIRECTLY BELOW MLConfig
+@dataclass
+class ThresholdsConfig:
+    """Confidence thresholds by strategy family"""
+    non_ml_confidence_threshold: float = float(os.getenv("NON_ML_CONFIDENCE_THRESHOLD", "0.45"))
+    ml_confidence_threshold: float = float(os.getenv("ML_CONFIDENCE_THRESHOLD", "0.60"))
+
 @dataclass
 class DatabaseConfig:
     """Database configuration settings"""
@@ -57,7 +64,13 @@ class NotificationConfig:
     """Notification configuration settings"""
     telegram_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
-    enable_notifications: bool = bool(telegram_token and telegram_chat_id)
+#    enable_notifications: bool = bool(telegram_token and telegram_chat_id)
+    enable_notifications: bool = False
+
+    def __post_init__(self):
+        self.enable_notifications = bool(self.telegram_token and self.telegram_chat_id)
+
+
 
 class Config:
     """Main configuration class that loads and manages all settings"""
@@ -145,6 +158,8 @@ class Config:
 
 # Global configuration instance
 config = Config()
+# after assembling 'config'
+config.thresholds = ThresholdsConfig()
 
 # Export commonly used settings
 TRADING_PAIRS = config.get_active_trading_pairs()

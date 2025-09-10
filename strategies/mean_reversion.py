@@ -27,7 +27,7 @@ class MeanReversionStrategy(BaseStrategy):
             'stoch_period': 14,
             'stoch_d_period': 3,
             'z_score_period': 50,
-            'z_score_threshold': 2.0,
+            'z_score_threshold': 1.6,
             'volume_confirmation': True,
             'volume_threshold': 1.2,
             'max_holding_time': 240,  # minutes
@@ -78,7 +78,17 @@ class MeanReversionStrategy(BaseStrategy):
             
             # Check market suitability for mean reversion
             if not self._is_suitable_for_mean_reversion(df):
-                return self._no_signal(symbol, "Market not suitable for mean reversion")
+                # wherever you detect unsuitability, compute basic metrics then:
+                detail = {
+                    "bars": len(df),
+                    "rsi": round(float(df['rsi'].iloc[-1]), 2) if 'rsi' in df.columns else None,
+                    "z": round(float(z_score.iloc[-1]), 2) if 'z_score' in locals() else None,
+                    "bb_width": round(float((df['bb_upper'] - df['bb_lower']).iloc[-1] / df['close'].iloc[-1] * 100), 3)
+                            if 'bb_upper' in df.columns and 'bb_lower' in df.columns else None,
+                    "atr": round(float(df['atr'].iloc[-1]), 6) if 'atr' in df.columns else None
+                }
+                return self._no_signal(symbol, "Market not suitable for mean reversion", detail=detail)
+
             
             # Generate signal
             signal = self._generate_mean_reversion_signal(symbol, df)
@@ -380,14 +390,7 @@ class MeanReversionStrategy(BaseStrategy):
     
     def _no_signal(self, symbol: str, reason: str) -> StrategySignal:
         """Generate no-action signal"""
-        return StrategySignal(
-            symbol=symbol,
-            action="hold",
-            confidence=0.0,
-            reasoning=reason,
-            timeframe=self.timeframes[0],
-            strategy_name=self.name
-        )
+        return super()._no_signal(symbol, reason, detail=getattr(self, "_last_detail", {}) or {})
     
     def is_market_condition_suitable(self, df: pd.DataFrame) -> bool:
         """Check if market conditions are suitable for mean reversion"""
@@ -523,7 +526,7 @@ class MeanReversionStrategy(BaseStrategy):
                 assessment_factors.append(f"RSI extreme ({rsi:.1f})")
             
             # Z-Score extremes
-            if abs(z_score) > 2:
+            if abs(z_score) >= self.parameters.get('z_score_threshold', 1.6):
                 opportunity_score += 2
                 assessment_factors.append(f"Z-Score extreme ({z_score:.2f})")
             

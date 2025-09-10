@@ -199,15 +199,17 @@ class StrategyManager:
                         # action == hold or anything unknown
                         # action == hold or anything unknown
                         # Keep the shape: reason=<string>; enrich with compact details if present
+                        # Keep the shape: reason=<string>; enrich with compact details if present
                         try:
                             _detail = getattr(signal, "detail", None)
-                            if isinstance(_detail, dict):
-                                # pick a few simple keys if available
-                                keys = [k for k in ("timeframe","bars","vol","avg_vol","atr","spread","z") if k in _detail][:4]
+                            base_reason = str(getattr(signal, "reasoning", "") or "hold")
+                            if isinstance(_detail, dict) and _detail:
+                                keys = [k for k in ("timeframe","bars","vol","avg_vol","atr","spread","z","trend","rsi","bb_width")
+                                        if k in _detail][:6]
                                 extra = "; ".join(f"{k}={_detail[k]}" for k in keys)
-                                reason_txt = f"action=hold; reason={getattr(signal, 'reasoning', '')}; {extra}" if extra else f"action=hold; reason={getattr(signal, 'reasoning', '')}"
+                                reason_txt = f"action=hold; reason={base_reason}; {extra}"
                             else:
-                                reason_txt = f"action=hold; reason={getattr(signal, 'reasoning', '')}"
+                                reason_txt = f"action=hold; reason={base_reason}"
                         except Exception:
                             reason_txt = f"action=hold; reason={getattr(signal, 'reasoning', '')}"
 

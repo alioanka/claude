@@ -267,18 +267,14 @@ class BaseStrategy(ABC):
 
 
 
-    def _no_signal(self, symbol: str, reason: str = "no-signal"):
+    def _no_signal(self, symbol: str, reason: str = "no-signal", detail: Optional[dict] = None):
         """
         Return a benign 'hold' signal-like object with a reason so the manager
-        can log a parseable rejection without crashing. Prefer a StrategySignal
-        if it's importable; fall back to a SimpleNamespace (duck-typing) so we
-        don't create a hard import dependency here.
+        can log a parseable rejection. Accepts optional 'detail' dict for dashboard.
         """
-        # Try to use the project's StrategySignal if available
         try:
-            # Adjust this import to match your project’s actual location of StrategySignal
-            from strategies.models import StrategySignal  # <-- if your code keeps it elsewhere, update this path
-            return StrategySignal(
+            from strategies.models import StrategySignal  # if you have it elsewhere, fine to ignore
+            obj = StrategySignal(
                 symbol=symbol,
                 action="hold",
                 confidence=0.0,
@@ -290,9 +286,12 @@ class BaseStrategy(ABC):
                 timeframe=getattr(self, "timeframe", "1m"),
                 strategy_name=getattr(self, "name", self.__class__.__name__),
             )
+            if detail:
+                setattr(obj, "detail", detail)
+            return obj
         except Exception:
-            # Non-fatal: return a simple object with the attrs the manager reads
-            return SimpleNamespace(
+            from types import SimpleNamespace
+            obj = SimpleNamespace(
                 symbol=symbol,
                 action="hold",
                 confidence=0.0,
@@ -304,6 +303,9 @@ class BaseStrategy(ABC):
                 timeframe=getattr(self, "timeframe", "1m"),
                 strategy_name=getattr(self, "name", self.__class__.__name__),
             )
+            if detail:
+                setattr(obj, "detail", detail)
+            return obj
 
 
     

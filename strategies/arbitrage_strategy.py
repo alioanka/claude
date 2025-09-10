@@ -49,6 +49,7 @@ class ArbitrageStrategy(BaseStrategy):
         # Pairs for statistical arbitrage
         self.correlation_pairs = []
         self.spread_history = {}
+        self._last_spread = 0.0
         
         # Initialize exchanges
         self._initialize_exchanges()
@@ -158,8 +159,36 @@ class ArbitrageStrategy(BaseStrategy):
                 return self._no_signal(symbol, "Insufficient data")
 
             sig = await self.generate_signal(symbol, df)  # your internal dict-like signal
+
+            # === Stat-arb fallback (optional) ===
+            try:
+                pairB = self._pick_correlated_pair(symbol)  # implement to pick from self.correlation_pairs
+                if pairB:
+                    dfA = self._get_df(symbol)   # your own helper to build same-length closes
+                    dfB = self._get_df(pairB)
+                    if len(dfA) > 80 and len(dfB) > 80:
+                        spread_series = (dfA['close'] - dfB['close'])
+                        z = (spread_series - spread_series.rolling(60).mean()) / (spread_series.rolling(60).std() + 1e-9)
+                        z_last = float(z.iloc[-1])
+                        if abs(z_last) >= 2.0:
+                            side = "sell" if z_last > 0 else "buy"  # mean reversion on spread
+                            conf = min(0.7, 0.5 + (abs(z_last) - 2.0) * 0.1)
+                            sig = StrategySignal(
+                                symbol=symbol, action=side, confidence=conf,
+                                entry_price=float(dfA['close'].iloc[-1]),
+                                reasoning=f"Stat-arb z={z_last:.2f} vs {pairB}",
+                                timeframe="15m", strategy_name=self.name
+                            )
+                            setattr(sig, "detail", {"z": round(z_last,2), "pairB": pairB})
+                            return sig
+            except Exception:
+                pass
+
             if not sig:
-                return self._no_signal(symbol, "No arb opportunity")
+                best = getattr(self, "_last_spread", None)
+                detail = {"spread": round(best, 5) if isinstance(best, (int,float)) else None}
+                return self._no_signal(symbol, "No arb opportunity", detail=detail)
+
 
             action = sig.get("action") or sig.get("side")
             action = (str(action).lower() if action else "hold")
@@ -232,6 +261,14 @@ class ArbitrageStrategy(BaseStrategy):
                     sell_revenue = sell_price['bid']  # We sell at bid price
                     
                     if buy_cost > 0 and sell_revenue > 0:
+                        # Track best observed normalized spread for diagnostics
+                        try:
+                            mid = (buy_cost + sell_revenue) / 2.0
+                            spread_ratio = abs(sell_revenue - buy_cost) / mid if mid else 0.0
+                            self._last_spread = max(getattr(self, "_last_spread", 0.0), float(spread_ratio))
+                        except Exception:
+                            pass
+                    
                         gross_profit = (sell_revenue - buy_cost) / buy_cost
                         net_profit = gross_profit - self.arb_config.transaction_cost
                         
