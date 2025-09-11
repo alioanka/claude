@@ -316,7 +316,20 @@ class DashboardManager:
                 
                 <div class="chart-container">
                     <h3>Portfolio Value</h3>
+                    <div style="margin-bottom:12px;">
+                    <label for="tf">Timeframe:</label>
+                    <select id="tf">
+                        <option value="1m">1m</option>
+                        <option value="5m" selected>5m</option>
+                        <option value="15m">15m</option>
+                        <option value="1h">1h</option>
+                        <option value="1d">1d</option>
+                        <option value="7d">7d</option>
+                        <option value="all">All</option>
+                    </select>
+                    </div>
                     <canvas id="portfolioChart"></canvas>
+
                 </div>
                 
                 <div class="chart-container">
@@ -397,7 +410,7 @@ class DashboardManager:
                     document.getElementById('status').className = 'status-error';
                     document.getElementById('status').textContent = 'Status: Disconnected';
                 };
-                
+
                 function updateDashboard(data) {
                     if (data.error) {
                         document.getElementById('status').className = 'status-error';
@@ -490,18 +503,49 @@ class DashboardManager:
                     }
                     
                     // Add new data point
-                    const now = new Date().toLocaleTimeString();
-                    portfolioChart.data.labels.push(now);
-                    portfolioChart.data.datasets[0].data.push(portfolio.total_value || 0);
-                    
-                    // Keep only last 50 points
-                    if (portfolioChart.data.labels.length > 50) {
+                    // --- timeframe controls & helpers ---
+                    let dataWindowMs = 5 * 60 * 1000; // default 5m
+                    const buckets = { '1m':60e3, '5m':5*60e3, '15m':15*60e3, '1h':60*60e3, '1d':24*60*60e3, '7d':7*24*60*60e3 };
+
+                    function trimSeries(){
+                    if(!Number.isFinite(dataWindowMs)) return; // 'all'
+                    const now = Date.now();
+                    while (portfolioChart.data.labels.length > 0) {
+                        const oldest = portfolioChart.data.labels[0]._ts || 0;
+                        if (now - oldest > dataWindowMs) {
                         portfolioChart.data.labels.shift();
                         portfolioChart.data.datasets[0].data.shift();
+                        } else break;
                     }
-                    
+                    }
+
+                    document.getElementById('tf').addEventListener('change', (e)=>{
+                    const v = e.target.value;
+                    dataWindowMs = (v==='all') ? Infinity : buckets[v];
+                    trimSeries();
                     portfolioChart.update();
-                }
+                    });
+
+                    function addPoint(tsIso, value) {
+                    const ts = new Date(tsIso).getTime();
+                    const bucket = (document.getElementById('tf').value === 'all')
+                                    ? 1000  // no dedup in 'all'
+                                    : (buckets[document.getElementById('tf').value] || 5*60e3);
+
+                    const last = portfolioChart.data.labels[portfolioChart.data.labels.length-1];
+                    // skip duplicates within same bucket
+                    if (last && Math.floor((last._ts||0)/bucket) === Math.floor(ts/bucket)) return;
+
+                    const label = new Date(ts).toLocaleTimeString();
+                    portfolioChart.data.labels.push(Object.assign(label, {_ts: ts}));
+                    portfolioChart.data.datasets[0].data.push(value);
+                    trimSeries();
+                    portfolioChart.update('none');
+                    }
+
+                    // --- use the helper when adding a point ---
+                    addPoint(portfolio.timestamp || new Date().toISOString(), portfolio.total_value || 0);
+
                 
                 // Initialize dashboard
                 window.onload = function() {

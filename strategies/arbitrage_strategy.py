@@ -287,6 +287,15 @@ class ArbitrageStrategy(BaseStrategy):
                                 'net_profit': net_profit,
                                 'confidence': min(net_profit * 20, 1.0)  # Scale to 0-1
                             }
+
+            # ... after you have the two effective prices for this symbol:
+            if buy_price and sell_price:
+                # symmetric % spread around the mid-price
+                mid = (buy_price + sell_price) / 2.0
+                if mid > 0:
+                    spread = abs(sell_price - buy_price) / mid
+                    self._last_spread = max(self._last_spread or 0.0, spread)
+
             
             if best_opportunity:
                 return {

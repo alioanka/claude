@@ -639,13 +639,16 @@ class TradeExecutor:
                 id=result.order_id or f"trade_{int(time.time())}",
                 symbol=signal.symbol,
                 side='long' if signal.side == 'buy' else 'short',
-                amount=result.executed_amount,
+#                amount=result.executed_amount,
+                size=float(result.executed_amount),
                 price=result.executed_price,
                 cost=result.executed_amount * result.executed_price,
                 timestamp=datetime.utcnow(),
                 order_id=result.order_id or "",
                 strategy=signal.strategy_name,
-                commission=result.commission
+ #               commission=result.commission
+ #               fee=trade_data.get("fee") or trade_data.get("commission", 0.0),
+                fee=float(getattr(result, 'commission', 0.0))
             )
             
             # Store in database

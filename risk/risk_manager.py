@@ -224,6 +224,25 @@ class RiskManager:
         except Exception as e:
             logger.error(f"❌ Correlation check error: {e}")
             return True
+
+    # --- add below your other _check_* helpers -----------------
+    def _check_position_limits(self) -> bool:
+        """
+        Enforce a simple cap on concurrently open positions.
+        Looks for config key 'max_open_positions' (default 5).
+        Returns True when within limits.
+        """
+        try:
+            max_pos = int(self.risk_limits.get('max_open_positions', 5))
+            if not hasattr(self.portfolio_manager, "get_position_count"):
+                return True
+            current = self.portfolio_manager.get_position_count()
+            return current < max_pos
+        except Exception as e:
+            self.logger.error(f"Position limit check failed: {e}")
+            # Fail open to avoid blocking the bot on telemetry issues
+            return True
+
     
     async def calculate_position_size(self, signal, available_balance: float) -> float:
         """Calculate optimal position size"""
@@ -239,27 +258,37 @@ class RiskManager:
             portfolio_value = max(0.0, float(portfolio_value))
 
             # Base risk (e.g., 2% of portfolio)
-            base_risk = portfolio_value * float(getattr(config.trading, "risk_per_trade", 0.02) or 0.02)
+            risk_pct = float(getattr(config.trading, "risk_per_trade", 0.02) or 0.02)
+            base_risk = portfolio_value * risk_pct
 
-            # Stop distance (absolute if stop provided; else 3% of entry)
-            stop_distance = 0.0
+            # Determine action (buy/sell) robustly
+            act = self._safe_action(signal)
+
+            # Stop distance
+            default_stop_pct = 0.03
             stop = getattr(signal, 'stop_loss', None)
-            if stop:
-                try:
-                    stop = float(stop)
-                except Exception:
-                    stop = None
+            try:
+                stop = float(stop) if stop is not None else None
+            except Exception:
+                stop = None
 
-            if stop and stop > 0:
-                stop_distance = abs(entry - stop)
+            if stop is not None and stop > 0:
+                if act == "buy":
+                    stop_distance = entry - stop
+                elif act == "sell":
+                    stop_distance = stop - entry
+                else:
+                    # unknown action → fall back to absolute distance
+                    stop_distance = abs(entry - stop)
+
+                # If stop is on the wrong side (<=0 distance), fall back to default
+                if stop_distance <= 0:
+                    stop_distance = entry * default_stop_pct
             else:
-                stop_distance = entry * 0.03  # default 3%
-
-            if stop_distance <= 0:
-                stop_distance = entry * 0.03
+                stop_distance = entry * default_stop_pct  # default 3%
 
             # Initial size: Risk / StopDistance
-            position_size = base_risk / stop_distance
+            position_size = base_risk / max(stop_distance, 1e-12)
 
             # Confidence scaling (min 0.5×)
             conf = float(getattr(signal, 'confidence', 1.0) or 1.0)
@@ -283,6 +312,7 @@ class RiskManager:
         except Exception as e:
             logger.error(f"❌ Position size calculation error: {e}")
             return 0.0
+
 
     
     def get_risk_metrics(self) -> Dict[str, Any]:
