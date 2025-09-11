@@ -525,7 +525,53 @@ class DashboardManager:
                 }
 
 
+
+                // --- timeframe controls (non-breaking) ---
+                let rawPoints = [];            // [{ts: number, val: number}]
+                let dataWindowMs = 5 * 60 * 1000; // default 5m
+                const TF_BUCKETS = { '1m':60e3, '5m':5*60e3, '15m':15*60e3, '1h':60*60e3, '1d':24*60*60e3, '7d':7*24*60*60e3 };
+
+                function resampleAndRender() {
+                    if (!portfolioChart) return;
+
+                    const tfSel = document.getElementById('tf');
+                    const tf = tfSel ? tfSel.value : '5m';
+                    const bucket = (tf === 'all') ? 0 : (TF_BUCKETS[tf] || 5*60e3);
+
+                    // window filter
+                    const now = Date.now();
+                    const windowMs = (tf === 'all') ? Infinity : dataWindowMs;
+                    const filtered = rawPoints.filter(p => (tf === 'all') || (now - p.ts <= windowMs));
+
+                    // simple bucketed dedup: keep last point per bucket
+                    let out = filtered;
+                    if (bucket > 0) {
+                        const map = new Map();
+                        for (const p of filtered) {
+                            const k = Math.floor(p.ts / bucket);
+                            map.set(k, p); // last one in bucket wins
+                        }
+                        out = Array.from(map.values()).sort((a,b)=>a.ts-b.ts);
+                    }
+
+                    // render
+                    portfolioChart.data.labels = out.map(p => Object.assign(new Date(p.ts).toLocaleTimeString(), { _ts: p.ts }));
+                    portfolioChart.data.datasets[0].data = out.map(p => p.val);
+                    portfolioChart.update('none');
+                }
+
+                // apply on timeframe change
+                document.addEventListener('change', (e) => {
+                    if (e.target && e.target.id === 'tf') {
+                        const v = e.target.value;
+                        dataWindowMs = (v === 'all') ? Infinity : (TF_BUCKETS[v] || 5*60e3);
+                        resampleAndRender();
+                    }
+                });
+
+
                 function updateChart(portfolio) {
+                    // init chart once (unchanged look)
                     if (!portfolioChart) {
                         const ctx = document.getElementById('portfolioChart').getContext('2d');
                         portfolioChart = new Chart(ctx, {
@@ -542,9 +588,7 @@ class DashboardManager:
                             },
                             options: {
                                 responsive: true,
-                                plugins: {
-                                    legend: { labels: { color: '#fff' } }
-                                },
+                                plugins: { legend: { labels: { color: '#fff' } } },
                                 scales: {
                                     x: { ticks: { color: '#ccc' } },
                                     y: { ticks: { color: '#ccc' } }
@@ -553,38 +597,28 @@ class DashboardManager:
                         });
                     }
 
-                    // use the timestamp the server already sends (falls back to now)
-                    addPoint(portfolio.timestamp || new Date().toISOString(), portfolio.total_value || 0);
-                }
+                    // guard: if backend gave nothing, don’t add zeros
+                    if (!portfolio || typeof portfolio !== 'object') return;
 
-                
-                // Initialize dashboard
-                window.onload = function() {
-                    console.log('Dashboard loaded');
-                };
+                    // take timestamp + value from payload; harden to numbers
+                    const tsIso = portfolio.timestamp || new Date().toISOString();
+                    const ts = Date.parse(tsIso);
+                    // prefer total_value, fallback to nested performance if ever present
+                    const val = Number(
+                        (portfolio.total_value != null ? portfolio.total_value : (portfolio.performance && portfolio.performance.portfolio_value))
+                    );
 
-                async function refreshRejections() {
-                    try {
-                        const res = await fetch('/api/rejections');
-                        const items = await res.json();
-                        const tbody = document.getElementById('rejectionsBody');
-                        if (!tbody) return;
-
-                        tbody.innerHTML = '';
-                        (items || []).forEach(ev => {
-                            const tr = document.createElement('tr');
-                            const ts = ev.timestamp ? new Date(ev.timestamp).toLocaleString() : '-';
-                            tr.innerHTML = `
-                                <td>${ts}</td>
-                                <td>${ev.strategy || '-'}</td>
-                                <td>${ev.symbol || '-'}</td>
-                                <td style="max-width:480px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${(ev.reason || ev.details || '').toString()}</td>
-                            `;
-                            tbody.appendChild(tr);
-                        });
-                    } catch (e) {
-                        console.error('Failed to refresh rejections:', e);
+                    if (!Number.isFinite(ts) || !Number.isFinite(val)) {
+                        // bad data → skip without breaking the rest of the dashboard
+                        return;
                     }
+
+                    // push to raw buffer, keep a reasonable cap (e.g., last 10k points)
+                    rawPoints.push({ ts, val });
+                    if (rawPoints.length > 10000) rawPoints.shift();
+
+                    // draw according to selected timeframe
+                    resampleAndRender();
                 }
 
                 // poll rejections every 10s

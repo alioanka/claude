@@ -43,7 +43,7 @@ class MomentumStrategy(BaseStrategy):
         
         # Strategy-specific settings
         self.requires_trend = True
-        self.min_confidence = 0.65
+        self.min_confidence = 0.50
         self.stop_loss_pct = 0.025  # 2.5% stop loss
         self.take_profit_pct = 0.055  # 5.5% take profit
     

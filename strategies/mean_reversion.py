@@ -183,14 +183,14 @@ class MeanReversionStrategy(BaseStrategy):
                 volatility_pct = (recent_atr / current_price) * 100
                 
                 # Need minimum volatility (0.5%) but not too high (8%)
-                if volatility_pct < 0.5 or volatility_pct > 8.0:
+                if volatility_pct < 0.3 or volatility_pct > 12.0:
                     logger.debug(f"Volatility unsuitable for mean reversion: {volatility_pct:.2f}%")
                     return False
             
             # Check Bollinger Band width (need sufficient width)
             if 'bb_width' in df.columns:
                 recent_bb_width = df['bb_width'].tail(5).mean()
-                if recent_bb_width < 0.02:  # Less than 2%
+                if recent_bb_width < 0.008:  # Less than 2%
                     logger.debug("Bollinger Bands too narrow for mean reversion")
                     return False
             
