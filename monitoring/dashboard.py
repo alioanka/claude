@@ -135,13 +135,51 @@ class DashboardManager:
             }
     
     async def get_positions_data(self) -> List[Dict[str, Any]]:
-        """Get current positions data"""
+        """Get current positions with live PnL using PortfolioManager's in-memory prices."""
         try:
+            # DB positions (authoritative for what's open)
             positions = await self.db.get_open_positions()
-            return [pos.to_dict() for pos in positions]
+            # In-memory positions (have live current_price)
+            live_positions = getattr(self.portfolio_manager, "positions", {}) or {}
+
+            out: List[Dict[str, Any]] = []
+            for pos in positions:
+                d = pos.to_dict()
+                sym = d.get("symbol")
+                side = str(d.get("side") or "").lower()
+                size = float(d.get("size") or 0.0)
+                entry = float(d.get("entry_price") or 0.0)
+
+                # Prefer the in-memory, up-to-date price
+                live = live_positions.get(sym)
+                if live and getattr(live, "current_price", None):
+                    cur = float(live.current_price)
+                else:
+                    cur = float(d.get("current_price") or entry)
+
+                # Recompute PnL on the fly
+                if size > 0.0 and entry > 0.0 and cur > 0.0:
+                    if side in ("long", "buy"):
+                        pnl = (cur - entry) * size
+                        pnl_pct = (cur - entry) / entry * 100.0
+                    else:  # short/sell
+                        pnl = (entry - cur) * size
+                        pnl_pct = (entry - cur) / entry * 100.0
+                else:
+                    pnl = float(d.get("pnl") or 0.0)
+                    pnl_pct = float(d.get("pnl_percentage") or 0.0)
+
+                d["current_price"] = cur
+                d["pnl"] = round(pnl, 2)
+                d["pnl_percentage"] = round(pnl_pct, 2)
+                d["strategy"] = d.get("strategy") or "unknown"
+                out.append(d)
+
+            return out
         except Exception as e:
             logger.error(f"Failed to get positions data: {e}")
             return []
+
     
     async def get_performance_data(self) -> Dict[str, Any]:
         """Get performance metrics"""
@@ -537,7 +575,7 @@ class DashboardManager:
                     if (e.target && e.target.id === 'tf') {
                         const v = e.target.value;
                         dataWindowMs = (v === 'all') ? Infinity : (TF_BUCKETS[v] || 5*60e3);
-                        resampleAndRender();
+                        resampleAndRender(v);
                     }
                 });
 
@@ -589,8 +627,11 @@ class DashboardManager:
                     rawPoints.push({ ts, val });
                     if (rawPoints.length > 10000) rawPoints.shift();
 
+
                     // draw according to selected timeframe
-                    resampleAndRender();
+                    const sel = document.getElementById('tf');
+                    resampleAndRender(sel ? sel.value : 'all');
+        
                 }
 
 
