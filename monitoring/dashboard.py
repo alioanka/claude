@@ -334,7 +334,6 @@ class DashboardManager:
                 <div class="chart-container">
                     <h3>Portfolio Value</h3>
                     <canvas id="portfolioChart"></canvas>
-
                 </div>
                 
                 <div class="chart-container">
@@ -417,46 +416,6 @@ class DashboardManager:
                 };
 
 
-                    // --- put with your existing script that sets up the chart ---
-                    let dataWindowMs = 5 * 60 * 1000; // default 5m
-                    const buckets = { '1m':60e3, '5m':5*60e3, '15m':15*60e3, '1h':60*60e3,
-                                    '1d':24*60*60e3, '7d':7*24*60*60e3 };
-
-                    document.getElementById('tf').addEventListener('change', (e)=>{
-                    const v = e.target.value;
-                    dataWindowMs = (v==='all') ? Infinity : buckets[v];
-                    trimSeries();
-                    portfolioChart.update();
-                    });
-
-                    function trimSeries(){
-                    if(!Number.isFinite(dataWindowMs)) return;
-                    const now = Date.now();
-                    while (portfolioChart.data.labels.length > 0) {
-                        const oldest = portfolioChart.data.labels[0]._ts || 0;
-                        if (now - oldest > dataWindowMs) {
-                        portfolioChart.data.labels.shift();
-                        portfolioChart.data.datasets[0].data.shift();
-                        } else break;
-                    }
-                    }
-
-                    // When adding a point:
-                    function addPoint(tsIso, value) {
-                    const ts = new Date(tsIso).getTime();
-                    const bucket = buckets[document.getElementById('tf').value] || 5*60e3;
-                    const last = portfolioChart.data.labels[portfolioChart.data.labels.length-1];
-                    // skip duplicates within same bucket
-                    if (last && Math.floor((last._ts||0)/bucket) === Math.floor(ts/bucket)) return;
-
-                    portfolioChart.data.labels.push(Object.assign(new Date(ts).toLocaleTimeString(), {_ts: ts}));
-                    portfolioChart.data.datasets[0].data.push(value);
-                    trimSeries();
-                    portfolioChart.update('none');
-                    }
-
-                    // In your websocket onmessage handler, replace the lines that push points with:
-                    addPoint(payload.timestamp, payload.performance?.portfolio_value ?? payload.portfolio?.total_value);
 
 
                 
@@ -560,8 +519,6 @@ class DashboardManager:
                     if (portfolioChart.data.labels.length > 50) {
                         portfolioChart.data.labels.shift();
                         portfolioChart.data.datasets[0].data.shift();
-                        } else break;
-                    }
                     }
                     
                     portfolioChart.update();
