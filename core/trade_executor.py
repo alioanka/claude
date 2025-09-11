@@ -635,27 +635,53 @@ class TradeExecutor:
         """Post-execution processing and record keeping"""
         try:
             # Create trade record
-            trade = Trade(
-                id=result.order_id or f"trade_{int(time.time())}",
-                symbol=signal.symbol,
-                side=('buy' if str(signal.side).lower() == 'buy' else 'sell'),
+ #           trade = Trade(
+ #               id=result.order_id or f"trade_{int(time.time())}",
+ #               symbol=signal.symbol,
+#                side=('buy' if str(signal.side).lower() == 'buy' else 'sell'),
 #                amount=result.executed_amount,
-                size=float(result.executed_amount),
-                price=float(result.executed_price),
+ #               size=float(result.executed_amount),
+ #               price=float(result.executed_price),
 #                cost=result.executed_amount * result.executed_price,
-                timestamp=datetime.utcnow(),
+#                timestamp=datetime.utcnow(),
 #                order_id=result.order_id or "",
-                exchange_order_id=(result.order_id or ""),
-                strategy=signal.strategy_name,
+#                exchange_order_id=(result.order_id or ""),
+#                strategy=signal.strategy_name,
  #               commission=result.commission
  #               fee=trade_data.get("fee") or trade_data.get("commission", 0.0),
-                fee=float(getattr(result, 'commission', 0.0)),
-                status='filled'
+#                fee=float(getattr(result, 'commission', 0.0)),
+#                status='filled'
+#            )
+            
+#            # Store in database
+ #           await self.db_manager.store_trade(trade)
+
+
+            trade_data = {
+                "id": result.order_id or f"trade_{int(time.time())}",
+                "symbol": signal.symbol,
+                "side": ("buy" if str(signal.side).lower() == "buy" else "sell"),
+                "size": float(result.executed_amount),
+                "price": float(result.executed_price),
+                "fee": float(getattr(result, "commission", 0.0)),
+                "timestamp": datetime.utcnow(),
+                "exchange_order_id": result.order_id or "",
+                "status": "filled",
+                "strategy": signal.strategy_name,
+                # "position_id": None,  # include if you link to a Position later
+            }
+
+            # Store in database (DatabaseManager expects a dict)
+            await self.db_manager.save_trade(trade_data)
+                
+            # Update portfolio
+            await self.portfolio_manager.add_position(
+                symbol=signal.symbol,
+                side='long' if signal.side == 'buy' else 'short',
+                amount=result.executed_amount,
+                entry_price=result.executed_price
             )
-            
-            # Store in database
-            await self.db_manager.store_trade(trade)
-            
+
             # Update portfolio
             await self.portfolio_manager.add_position(
                 symbol=signal.symbol,
