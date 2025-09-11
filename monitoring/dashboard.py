@@ -316,25 +316,23 @@ class DashboardManager:
                 
 
 
-                <div style="margin-bottom:12px;">
-                <label for="tf">Timeframe:</label>
-                <select id="tf">
-                    <option value="1m">1m</option>
-                    <option value="5m" selected>5m</option>
-                    <option value="15m">15m</option>
-                    <option value="1h">1h</option>
-                    <option value="1d">1d</option>
-                    <option value="7d">7d</option>
-                    <option value="all">All</option>
-                </select>
-                </div>
-                <canvas id="portfolioChart" height="120"></canvas>
-
-
                 <div class="chart-container">
                     <h3>Portfolio Value</h3>
+                    <div style="margin-bottom:12px;">
+                      <label for="tf">Timeframe:</label>
+                      <select id="tf">
+                        <option value="1m">1m</option>
+                        <option value="5m" selected>5m</option>
+                        <option value="15m">15m</option>
+                        <option value="1h">1h</option>
+                        <option value="1d">1d</option>
+                        <option value="7d">7d</option>
+                        <option value="all">All</option>
+                      </select>
+                    </div>
                     <canvas id="portfolioChart"></canvas>
                 </div>
+
                 
                 <div class="chart-container">
                     <h3>Recent Positions</h3>
@@ -481,8 +479,53 @@ class DashboardManager:
                     `).join('');
                 }
                 
+
+                // === timeframe helpers (minimal, safe) ===
+                let dataWindowMs = 5 * 60 * 1000; // default 5m
+                const TF_BUCKETS = { '1m':60e3, '5m':5*60e3, '15m':15*60e3, '1h':60*60e3, '1d':24*60*60e3, '7d':7*24*60*60e3 };
+
+                function trimSeries() {
+                if (!portfolioChart) return;
+                if (!Number.isFinite(dataWindowMs)) return; // 'all'
+                const now = Date.now();
+                while (portfolioChart.data.labels.length > 0) {
+                    const oldestTs = portfolioChart.data.labels[0]._ts || 0;
+                    if (now - oldestTs > dataWindowMs) {
+                    portfolioChart.data.labels.shift();
+                    portfolioChart.data.datasets[0].data.shift();
+                    } else break;
+                }
+                }
+
+                document.addEventListener('change', (e) => {
+                if (e.target && e.target.id === 'tf') {
+                    const v = e.target.value;
+                    dataWindowMs = (v === 'all') ? Infinity : TF_BUCKETS[v] || (5 * 60e3);
+                    trimSeries();
+                    if (portfolioChart) portfolioChart.update();
+                }
+                });
+
+                function addPoint(tsIso, value) {
+                const ts = tsIso ? Date.parse(tsIso) : Date.now();
+                const tfSel = document.getElementById('tf');
+                const bucket = (!tfSel || tfSel.value === 'all')
+                    ? 1000 // effectively no dedup in 'all'
+                    : (TF_BUCKETS[tfSel.value] || 5 * 60e3);
+
+                const last = portfolioChart && portfolioChart.data.labels[portfolioChart.data.labels.length - 1];
+                // de-dup points that fall into the same bucket window
+                if (last && Math.floor((last._ts || 0) / bucket) === Math.floor(ts / bucket)) return;
+
+                const labelObj = Object.assign(new Date(ts).toLocaleTimeString(), { _ts: ts });
+                portfolioChart.data.labels.push(labelObj);
+                portfolioChart.data.datasets[0].data.push(Number(value) || 0);
+                trimSeries();
+                portfolioChart.update('none');
+                }
+
+
                 function updateChart(portfolio) {
-                    // Simple portfolio chart implementation
                     if (!portfolioChart) {
                         const ctx = document.getElementById('portfolioChart').getContext('2d');
                         portfolioChart = new Chart(ctx, {
@@ -509,20 +552,11 @@ class DashboardManager:
                             }
                         });
                     }
-                    
-                    // Add new data point
-                    const now = new Date().toLocaleTimeString();
-                    portfolioChart.data.labels.push(now);
-                    portfolioChart.data.datasets[0].data.push(portfolio.total_value || 0);
-                    
-                    // Keep only last 50 points
-                    if (portfolioChart.data.labels.length > 50) {
-                        portfolioChart.data.labels.shift();
-                        portfolioChart.data.datasets[0].data.shift();
-                    }
-                    
-                    portfolioChart.update();
+
+                    // use the timestamp the server already sends (falls back to now)
+                    addPoint(portfolio.timestamp || new Date().toISOString(), portfolio.total_value || 0);
                 }
+
                 
                 // Initialize dashboard
                 window.onload = function() {
