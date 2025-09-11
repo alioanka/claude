@@ -224,20 +224,22 @@ class PortfolioManager:
         except Exception as e:
             logger.error(f"❌ Failed to load performance history: {e}")
     
-    async def add_position(self, symbol: str, side: str, amount: float,
-                          entry_price: float, strategy: str = "unknown") -> bool:
+    async def add_position(self, symbol: str, side: str, amount: float, 
+                          entry_price: float) -> bool:
         """Add new position to portfolio"""
         try:
+            # Check if position already exists
             if symbol in self.positions:
                 logger.warning(f"⚠️ Position already exists for {symbol}")
                 return False
-
+            
+            # Get current market price
             current_price = await self.exchange_manager.get_current_price(symbol)
             if not current_price:
                 logger.error(f"❌ Cannot get current price for {symbol}")
                 return False
-
-            # in-memory
+            
+            # Create position
             position = PortfolioPosition(
                 symbol=symbol,
                 side=side,
@@ -246,32 +248,40 @@ class PortfolioManager:
                 current_price=current_price,
                 timestamp=datetime.utcnow()
             )
+            
+            # Add to positions
             self.positions[symbol] = position
-
-            # balances
-            notional = amount * entry_price
-            self.used_balance += notional
-            self.available_balance -= notional
-
-            # persist to DB (dict path maps amount -> size and stores strategy)
-            pos_data = {
-                "symbol": symbol,
-                "side": side,
-                "amount": float(amount),
-                "entry_price": float(entry_price),
-                "current_price": float(current_price),
-                "strategy": strategy,
+            
+            # Update balances
+            position_value = amount * entry_price
+            self.used_balance += position_value
+            self.available_balance -= position_value
+            
+            # Store in database
+            # Store in database (use dict -> manager maps 'amount' -> 'size')
+            position_dict = {
+                'symbol': symbol,
+                'side': side,
+                'amount': amount,
+                'entry_price': entry_price,
+                'current_price': current_price,
+                'strategy': 'unknown',
+                'pnl': position.unrealized_pnl,
+                'pnl_percentage': position.unrealized_pnl_pct,
             }
-            await self.db_manager.store_position(pos_data)
+            await self.db_manager.store_position(position_dict)
 
+
+            
+            # Update metrics
             await self.calculate_portfolio_metrics()
-            logger.info(f"➕ Position added: {symbol} {side} {amount:.6f} @ ${entry_price:.4f} [{strategy}]")
+            
+            logger.info(f"➕ Position added: {symbol} {side} {amount:.6f} @ ${entry_price:.4f}")
             return True
-
+            
         except Exception as e:
             logger.error(f"❌ Failed to add position for {symbol}: {e}")
             return False
-
     
     async def remove_position(self, symbol: str, exit_price: float) -> Optional[PortfolioPosition]:
         """Remove position from portfolio"""

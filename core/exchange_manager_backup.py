@@ -490,18 +490,23 @@ class ExchangeManager:
             return []
     
     async def get_current_price(self, symbol: str) -> Optional[float]:
-        """Get current market price for a symbol"""
+        """Get current market price for a symbol (normalized for ccxt in all modes)"""
         try:
             ex_symbol = self._to_exchange_symbol(symbol)
-            if self.is_paper_trading:
-                # paper engine already does normalization internally, keep symbol
-                return await self.paper_engine.get_market_price(symbol)
-            else:
-                async with self.rate_limiter:
-                    ticker = await self.exchange.fetch_ticker(ex_symbol)
-                    return ticker.get('last')
+            async with self.rate_limiter:
+                ticker = await self.exchange.fetch_ticker(ex_symbol)
+                price = ticker.get('last') or (
+                    ((ticker.get('bid') or 0) + (ticker.get('ask') or 0)) / 2 if ticker else 0
+                )
+                return float(price) if price else None
         except Exception as e:
             logger.error(f"Failed to get current price for {symbol}: {e}")
+            # Paper fallback via the paper engine mock as last resort
+            if self.is_paper_trading and hasattr(self, "paper_engine"):
+                try:
+                    return await self.paper_engine.get_market_price(symbol)
+                except Exception:
+                    pass
             return None
 
     

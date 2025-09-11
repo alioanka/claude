@@ -370,23 +370,16 @@ class DatabaseManager:
             
             # Create Position object if it's a dict
             if isinstance(position, dict):
-                size_val = position.get('size')
-                if size_val is None:
-                    size_val = position.get('amount')  # backward compat
-                if size_val is None:
-                    raise ValueError("Position requires 'size' or 'amount'")
-
                 db_position = Position(
                     symbol=position['symbol'],
                     side=position['side'],
-                    size=float(size_val),
-                    entry_price=float(position['entry_price']),
-                    current_price=float(position.get('current_price', position['entry_price'])),
+                    size=position['amount'],
+                    entry_price=position['entry_price'],
+                    current_price=position.get('current_price', position['entry_price']),
                     strategy=position.get('strategy', 'unknown'),
-                    pnl=float(position.get('pnl', 0.0)),
-                    pnl_percentage=float(position.get('pnl_percentage', 0.0))
+                    pnl=position.get('pnl', 0.0),
+                    pnl_percentage=position.get('pnl_percentage', 0.0)
                 )
-
             else:
                 db_position = position
             

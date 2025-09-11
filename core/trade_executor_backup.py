@@ -634,43 +634,76 @@ class TradeExecutor:
     async def post_execution_processing(self, signal: TradeSignal, result: ExecutionResult):
         """Post-execution processing and record keeping"""
         try:
-            # Trade (DB model uses size/price/fee, and side expects 'buy'/'sell')
+            # Create trade record
+ #           trade = Trade(
+ #               id=result.order_id or f"trade_{int(time.time())}",
+ #               symbol=signal.symbol,
+#                side=('buy' if str(signal.side).lower() == 'buy' else 'sell'),
+#                amount=result.executed_amount,
+ #               size=float(result.executed_amount),
+ #               price=float(result.executed_price),
+#                cost=result.executed_amount * result.executed_price,
+#                timestamp=datetime.utcnow(),
+#                order_id=result.order_id or "",
+#                exchange_order_id=(result.order_id or ""),
+#                strategy=signal.strategy_name,
+ #               commission=result.commission
+ #               fee=trade_data.get("fee") or trade_data.get("commission", 0.0),
+#                fee=float(getattr(result, 'commission', 0.0)),
+#                status='filled'
+#            )
+            
+#            # Store in database
+ #           await self.db_manager.store_trade(trade)
+
+
             trade_data = {
+                "id": result.order_id or f"trade_{int(time.time())}",
                 "symbol": signal.symbol,
-                "side": "buy" if signal.side == "buy" else "sell",
+                "side": ("buy" if str(signal.side).lower() == "buy" else "sell"),
                 "size": float(result.executed_amount),
                 "price": float(result.executed_price),
                 "fee": float(getattr(result, "commission", 0.0)),
                 "timestamp": datetime.utcnow(),
                 "exchange_order_id": result.order_id or "",
-                "status": "filled" if result.success else "failed",
-                "strategy": signal.strategy_name or "unknown",
-                "notes": "",
+                "status": "filled",
+                "strategy": signal.strategy_name,
+                # "position_id": None,  # include if you link to a Position later
             }
-            await self.db_manager.save_trade(trade_data)
 
-            # Portfolio position (store strategy explicitly)
+            # Store in database (DatabaseManager expects a dict)
+            await self.db_manager.save_trade(trade_data)
+                
+            # Update portfolio
             await self.portfolio_manager.add_position(
                 symbol=signal.symbol,
-                side="long" if signal.side == "buy" else "short",
-                amount=float(result.executed_amount),
-                entry_price=float(result.executed_price),
-                strategy=signal.strategy_name or "unknown",
+                side='long' if signal.side == 'buy' else 'short',
+                amount=result.executed_amount,
+                entry_price=result.executed_price
             )
 
-            # Human-readable trade log
+            # Update portfolio
+            await self.portfolio_manager.add_position(
+                symbol=signal.symbol,
+                side='long' if signal.side == 'buy' else 'short',
+                amount=result.executed_amount,
+                entry_price=result.executed_price
+            )
+            
+            # Log execution
             trade_logger.log_trade_entry(
                 signal.symbol, signal.side, result.executed_amount,
                 result.executed_price, signal.strategy_name
             )
+            
             logger.info(
                 f"✅ Trade executed: {signal.symbol} {signal.side} "
                 f"{result.executed_amount:.6f} @ ${result.executed_price:.4f}"
             )
-
+            
         except Exception as e:
             logger.error(f"❌ Post-execution processing failed: {e}")
-   
+    
     def update_execution_stats(self, result: ExecutionResult, execution_time: float):
         """Update execution statistics"""
         try:

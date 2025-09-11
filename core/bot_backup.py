@@ -411,24 +411,9 @@ class TradingBot:
                 return True
             
             # Check time-based exit (24 hours max)
-            # Check time-based exit (24 hours max)
-            ts = position.get('timestamp')
-            if isinstance(ts, str):
-                try:
-                    ts = datetime.fromisoformat(ts)
-                except Exception:
-                    # fallback if ms epoch slipped in
-                    try:
-                        ts = datetime.utcfromtimestamp(float(ts) / 1000.0)
-                    except Exception:
-                        ts = datetime.utcnow()
-            elif not isinstance(ts, datetime):
-                ts = datetime.utcnow()
-
-            position_age = datetime.utcnow() - ts
+            position_age = datetime.utcnow() - position['timestamp']
             if position_age > timedelta(hours=24):
                 return True
-
             
             return False
             
