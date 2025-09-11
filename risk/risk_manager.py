@@ -27,7 +27,8 @@ class RiskManager:
             'max_total_exposure_percent': 80,  # 80% max total exposure
             'max_daily_loss_percent': 5,      # 5% max daily loss
             'max_correlation': 0.7,           # 70% max correlation
-            'min_position_size_usd': 10       # $10 minimum position
+            'min_position_size_usd': 10,
+            'max_open_positions': 5       # $10 minimum position
         }
         
         # Load risk rules from config
@@ -98,7 +99,7 @@ class RiskManager:
                 return False
 
             # Correlation cluster control
-            if not await self._check_correlation(signal):
+            if not await self._check_correlation_risk(signal):
                 self.blocked_signals += 1
                 logger.warning(f"🚫 Signal blocked by risk management (correlation): {signal.symbol}")
                 return False
@@ -229,18 +230,22 @@ class RiskManager:
     def _check_position_limits(self) -> bool:
         """
         Enforce a simple cap on concurrently open positions.
-        Looks for config key 'max_open_positions' (default 5).
+        Uses risk_limits['max_open_positions'] (default 5).
         Returns True when within limits.
         """
         try:
             max_pos = int(self.risk_limits.get('max_open_positions', 5))
-            if not hasattr(self.portfolio_manager, "get_position_count"):
+            pm = self.portfolio_manager
+            if not pm:
                 return True
-            current = self.portfolio_manager.get_position_count()
+            if hasattr(pm, "get_position_count"):
+                current = pm.get_position_count()  # PortfolioManager exposes this
+            else:
+                # Soft-fail: if we can’t read positions, don’t hard-block signals
+                return True
             return current < max_pos
         except Exception as e:
-            self.logger.error(f"Position limit check failed: {e}")
-            # Fail open to avoid blocking the bot on telemetry issues
+            logger.error(f"Position limit check failed: {e}")
             return True
 
     

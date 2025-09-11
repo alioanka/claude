@@ -487,34 +487,50 @@ class DashboardManager:
                 let dataWindowMs = 5 * 60 * 1000; // default 5m
                 const TF_BUCKETS = { '1m':60e3, '5m':5*60e3, '15m':15*60e3, '1h':60*60e3, '1d':24*60*60e3, '7d':7*24*60*60e3 };
 
-                function resampleAndRender() {
-                    if (!portfolioChart) return;
+                function resampleAndRender(tf) {
+                const TF_BUCKETS = { '1m':60_000, '5m':300_000, '15m':900_000, '1h':3_600_000, '1d':86_400_000, '7d':7*86_400_000 };
+                const now = Date.now();
+                const windowMs = (tf === 'all') ? Number.POSITIVE_INFINITY : (TF_BUCKETS[tf] ?? 300_000);
+                const bucket = (tf === 'all') ? 0 : (TF_BUCKETS[tf] ?? 300_000);
 
-                    const tfSel = document.getElementById('tf');
-                    const tf = tfSel ? tfSel.value : '5m';
-                    const bucket = (tf === 'all') ? 0 : (TF_BUCKETS[tf] || 5*60e3);
+                // 1) filter to timeframe
+                let filtered = rawPoints.filter(p => (tf === 'all') || (now - p.ts <= windowMs));
 
-                    // window filter
-                    const now = Date.now();
-                    const windowMs = (tf === 'all') ? Infinity : dataWindowMs;
-                    const filtered = rawPoints.filter(p => (tf === 'all') || (now - p.ts <= windowMs));
-
-                    // simple bucketed dedup: keep last point per bucket
-                    let out = filtered;
-                    if (bucket > 0) {
-                        const map = new Map();
-                        for (const p of filtered) {
-                            const k = Math.floor(p.ts / bucket);
-                            map.set(k, p); // last one in bucket wins
-                        }
-                        out = Array.from(map.values()).sort((a,b)=>a.ts-b.ts);
-                    }
-
-                    // render
-                    portfolioChart.data.labels = out.map(p => Object.assign(new Date(p.ts).toLocaleTimeString(), { _ts: p.ts }));
-                    portfolioChart.data.datasets[0].data = out.map(p => p.val);
-                    portfolioChart.update('none');
+                // 2) bucketize (keep last in each bucket)
+                let out;
+                if (bucket > 0 && filtered.length > 1) {
+                    const map = new Map();
+                    for (const p of filtered) map.set(Math.floor(p.ts / bucket), p);
+                    out = Array.from(map.values()).sort((a,b) => a.ts - b.ts);
+                } else {
+                    out = filtered.slice();
                 }
+
+                // 3) ensure we always have ≥ 2 points for a visible line
+                if (out.length === 1) {
+                    out = [ { ts: out[0].ts - 5000, val: out[0].val }, out[0] ];
+                } else if (out.length === 0 && rawPoints.length) {
+                    const last = rawPoints[rawPoints.length - 1];
+                    out = [ { ts: last.ts - 5000, val: last.val }, last ];
+                }
+
+                // 4) apply to chart
+                const labels = out.map(p => new Date(p.ts).toLocaleTimeString());
+                const data = out.map(p => p.val);
+                portfolioChart.data.labels = labels;
+                portfolioChart.data.datasets[0].data = data;
+
+                // 5) suggest a sensible y-range around values if we have data
+                if (data.length) {
+                    const min = Math.min(...data), max = Math.max(...data);
+                    const pad = Math.max(1, (max - min) * 0.002); // ~0.2%
+                    portfolioChart.options.scales.y.suggestedMin = min - pad;
+                    portfolioChart.options.scales.y.suggestedMax = max + pad;
+                }
+
+                portfolioChart.update();
+                }
+
 
                 // apply on timeframe change
                 document.addEventListener('change', (e) => {
