@@ -517,13 +517,8 @@ class DashboardManager:
                 // 4) apply to chart
                 const labels = out.map(p => new Date(p.ts).toLocaleTimeString());
                 const data = out.map(p => p.val);
-                // Add new data point
-                const now = new Date().toLocaleTimeString();
-                portfolioChart.data.labels.push(now);
-                portfolioChart.data.datasets[0].data.push(portfolio.total_value || 0);
-
-                // Keep only last 50 points
-
+                portfolioChart.data.labels = labels;
+                portfolioChart.data.datasets[0].data = data;
 
                 // 5) suggest a sensible y-range around values if we have data
                 if (data.length) {
