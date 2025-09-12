@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from enum import Enum
+import json
 import time
 
 from config.config import config
@@ -645,7 +646,7 @@ class TradeExecutor:
                 "exchange_order_id": result.order_id or "",
                 "status": "filled" if result.success else "failed",
                 "strategy": signal.strategy_name or "unknown",
-                "notes": "",
+                "notes": json.dumps(getattr(signal, "features", None) or {}),
             }
             await self.db_manager.save_trade(trade_data)
 

@@ -406,6 +406,23 @@ class TradingBot:
                 elif side == 'short' and current_price <= signal.take_profit:
                     return True
             
+
+            # Fallback SL/TP if we don't have the originating signal (legacy open positions)
+            if symbol not in self.active_signals:
+                sl_pct = float(getattr(config.trading, 'stop_loss_percent', 0.03))
+                tp_pct = float(getattr(config.trading, 'take_profit_percent', 0.06))
+                if side == 'long':
+                    if current_price <= entry_price * (1 - sl_pct):   # SL
+                        return True
+                    if current_price >= entry_price * (1 + tp_pct):   # TP
+                        return True
+                else:  # short
+                    if current_price >= entry_price * (1 + sl_pct):   # SL
+                        return True
+                    if current_price <= entry_price * (1 - tp_pct):   # TP
+                        return True
+
+
             # Check maximum drawdown
             if pnl_pct < -config.trading.max_drawdown:
                 return True

@@ -489,20 +489,37 @@ class ExchangeManager:
             logger.error(f"Failed to get positions: {e}")
             return []
     
+# a few lines above for context
     async def get_current_price(self, symbol: str) -> Optional[float]:
-        """Get current market price for a symbol"""
+        """Get current market price for a symbol (use exchange ticker even in paper mode)."""
         try:
             ex_symbol = self._to_exchange_symbol(symbol)
-            if self.is_paper_trading:
-                # paper engine already does normalization internally, keep symbol
-                return await self.paper_engine.get_market_price(symbol)
-            else:
-                async with self.rate_limiter:
-                    ticker = await self.exchange.fetch_ticker(ex_symbol)
-                    return ticker.get('last')
+            async with self.rate_limiter:
+                ticker = await self.exchange.fetch_ticker(ex_symbol)
+            price = ticker.get('last') or (
+                ((ticker.get('bid') or 0) + (ticker.get('ask') or 0)) / 2 if (ticker.get('bid') and ticker.get('ask')) else None
+            )
+            if price and price > 0:
+                return float(price)
         except Exception as e:
-            logger.error(f"Failed to get current price for {symbol}: {e}")
-            return None
+            logger.warning(f"Price fetch failed for {symbol}: {e}")
+
+        # Fallbacks for resilience in paper mode
+        try:
+            if self.paper_engine:
+                # last known executed price for this symbol
+                pos = self.paper_engine.positions.get(symbol)
+                if pos and pos.get("price"):
+                    return float(pos["price"])
+                # last trade record for this symbol
+                for o in reversed(self.paper_engine.trade_history):
+                    if o.get("symbol") == symbol and o.get("price"):
+                        return float(o["price"])
+        except Exception:
+            pass
+
+        return None
+
 
     
     async def get_order_book(self, symbol: str, limit: int = 100) -> Optional[Dict]:
