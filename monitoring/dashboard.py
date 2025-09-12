@@ -182,29 +182,20 @@ class DashboardManager:
             return {}
 
     
-    async def get_trades_data(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Get recent trades data"""
-        try:
-            session = self.db.get_session()
-            
-            trades = session.query(Trade).order_by(
-                Trade.timestamp.desc()
-            ).limit(limit).all()
-            
-            session.close()
-            return [trade.to_dict() for trade in trades]
-        except Exception as e:
-            logger.error(f"Failed to get trades data: {e}")
-            return []
-    
-    async def get_signals_data(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Get recent signals data"""
-        try:
-            signals = await self.db.get_signals(limit=limit)
-            return [signal.to_dict() for signal in signals]
-        except Exception as e:
-            logger.error(f"Failed to get signals data: {e}")
-            return []
+    # AFTER (minimal change, safer)
+    async def get_trades_data(self, limit: int = 50) -> dict:
+        trades = self.db.get_recent_trades(limit=limit)
+        return {"trades": trades}
+
+        
+        async def get_signals_data(self, limit: int = 50) -> List[Dict[str, Any]]:
+            """Get recent signals data"""
+            try:
+                signals = await self.db.get_signals(limit=limit)
+                return [signal.to_dict() for signal in signals]
+            except Exception as e:
+                logger.error(f"Failed to get signals data: {e}")
+                return []
         
     # monitoring/dashboard.py
     async def get_rejections_data(self, limit: int = 100) -> List[Dict[str, Any]]:

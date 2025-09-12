@@ -739,7 +739,7 @@ class TradeExecutor:
                         "exchange_order_id": result.order_id or "",
                         "status": "exit",
                         "strategy": (getattr(removed_position, "strategy", None) or "position_close"),
-                        "notes": json.dumps({"reason": "manual_close" })
+                        "notes": json.dumps({"reason": "manual/SL/TP", "pnl": getattr(removed_position, "realized_pnl", None)})
                     }
                     if hasattr(self.db_manager, 'save_trade'):
                         await self.db_manager.save_trade(trade_data)

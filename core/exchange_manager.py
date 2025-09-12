@@ -276,7 +276,8 @@ class ExchangeManager:
                             logger.info("Exchange connection successful")
                         else:
                             # Fallback: test with ticker data
-                            ticker = await self.exchange.fetch_ticker('BTCUSDT')
+                            ex_btc = self._to_exchange_symbol('BTCUSDT')
+                            ticker = await self.exchange.fetch_ticker(ex_btc)
                             logger.info(f"Exchange connection successful. BTC: ${ticker.get('last', 0):.2f}")
                     except Exception as api_error:
                         logger.warning(f"API test failed: {api_error}")
@@ -492,26 +493,41 @@ class ExchangeManager:
 # a few lines above for context
     async def get_current_price(self, symbol: str) -> Optional[float]:
         """Get current market price for a symbol (use exchange ticker even in paper mode)."""
+        ex_symbol = self._to_exchange_symbol(symbol)
+
+        # 1) Try once
         try:
-            ex_symbol = self._to_exchange_symbol(symbol)
             async with self.rate_limiter:
                 ticker = await self.exchange.fetch_ticker(ex_symbol)
             price = ticker.get('last') or (
-                ((ticker.get('bid') or 0) + (ticker.get('ask') or 0)) / 2 if (ticker.get('bid') and ticker.get('ask')) else None
+                ((ticker.get('bid') or 0) + (ticker.get('ask') or 0)) / 2
+                if (ticker.get('bid') and ticker.get('ask')) else None
             )
             if price and price > 0:
                 return float(price)
         except Exception as e:
-            logger.warning(f"Price fetch failed for {symbol}: {e}")
+            logger.debug(f"First ticker fetch failed for {ex_symbol}: {e}")
 
-        # Fallbacks for resilience in paper mode
+        # 2) Reload markets and retry once (fixes cases like RNDR not in current markets)
+        try:
+            async with self.rate_limiter:
+                await self.exchange.load_markets(reload=True)
+                ticker = await self.exchange.fetch_ticker(ex_symbol)
+            price = ticker.get('last') or (
+                ((ticker.get('bid') or 0) + (ticker.get('ask') or 0)) / 2
+                if (ticker.get('bid') and ticker.get('ask')) else None
+            )
+            if price and price > 0:
+                return float(price)
+        except Exception as e:
+            logger.warning(f"Price fetch failed for {symbol} after markets reload: {e}")
+
+        # 3) Fallbacks for resilience in paper mode (your existing behavior)
         try:
             if self.paper_engine:
-                # last known executed price for this symbol
                 pos = self.paper_engine.positions.get(symbol)
                 if pos and pos.get("price"):
                     return float(pos["price"])
-                # last trade record for this symbol
                 for o in reversed(self.paper_engine.trade_history):
                     if o.get("symbol") == symbol and o.get("price"):
                         return float(o["price"])
@@ -519,6 +535,7 @@ class ExchangeManager:
             pass
 
         return None
+
 
 
     

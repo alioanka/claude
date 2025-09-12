@@ -362,6 +362,28 @@ class DatabaseManager:
                 session.close()
             return []
 
+
+    # --- add below inside DatabaseManager (near other getters) ---
+    def get_recent_trades(self, limit: int = 50) -> list[dict]:
+        """Return the most recent trades (newest first) as plain dicts."""
+        session = None
+        try:
+            session = self.get_session()
+            rows = (
+                session.query(Trade)
+                .order_by(Trade.timestamp.desc())
+                .limit(limit)
+                .all()
+            )
+            return [t.to_dict() for t in rows]
+        except Exception as e:
+            logger.error(f"Failed to get recent trades: {e}")
+            return []
+        finally:
+            if session:
+                session.close()
+
+
     async def store_position(self, position) -> bool:
         """Store position in database"""
         session = None
