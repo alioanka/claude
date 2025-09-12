@@ -83,8 +83,8 @@ class TradingBotApplication:
                     self.bot.portfolio_manager.db_manager,
                     self.bot.portfolio_manager
                 )
-                dashboard.trade_executor = bot.trade_executor
-                dashboard.bot = bot
+#                dashboard.trade_executor = bot.trade_executor
+#                dashboard.bot = bot
                 logger.info("✅ Dashboard manager initialized")
             except Exception as e:
                 logger.warning(f"⚠️ Dashboard manager failed to initialize: {e}")
