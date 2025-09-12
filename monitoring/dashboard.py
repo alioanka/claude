@@ -13,9 +13,9 @@ from fastapi.responses import HTMLResponse
 import logging
 from data.database import DatabaseManager, Trade, Position
 from core.portfolio_manager import PortfolioManager
-from fastapi import APIRouter
+#from fastapi import APIRouter
 
-router = APIRouter()
+#router = APIRouter()
 logger = logging.getLogger(__name__)
 
 class DashboardManager:
