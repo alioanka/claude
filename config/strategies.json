@@ -1,9 +1,9 @@
 {
     "strategy_allocation": {
-        "momentum_strategy": 0.3,
-        "mean_reversion": 0.25,
-        "ml_strategy": 0.35,
-        "arbitrage_strategy": 0.1
+        "momentum_strategy": 0.25,
+        "mean_reversion": 0.30,
+        "ml_strategy": 0.30,
+        "arbitrage_strategy": 0.15
     },
     "momentum_strategy": {
         "name": "Enhanced Momentum Strategy",
@@ -65,9 +65,19 @@
         "timeframes": ["1m", "5m", "15m"],
         "risk_weight": 1.0,
         "parameters": {
-          "rsi_overbought": 70,
-          "rsi_oversold": 30,
-          "entry_threshold": 0.2
+            "bb_period": 20,
+            "bb_std_dev": 2.0,
+            "rsi_period": 14,
+            "rsi_overbought": 72,
+            "rsi_oversold": 28,
+            "z_score_period": 50,
+            "z_score_threshold": 1.55,
+            "volume_confirmation": true,
+            "volume_threshold": 1.15,
+            "max_holding_time": 240,
+            "profit_target_pct": 0.03,
+            "stop_loss_pct": 0.025,
+              "entry_threshold": 0.2
         },
         "indicators": {
             "bollinger_bands": {
@@ -160,11 +170,26 @@
           "transaction_cost": 0.0005,
           "lookback_period": 100
         },
-        "pairs": [
-            ["BTCUSDT", "ETHUSDT"],
-            ["ADAUSDT", "SOLUSDT"],
-            ["LINKUSDT", "AVAXUSDT"]
-        ],
+        "arbitrage_params": {
+            "min_spread_threshold": 0.0008,
+            "max_spread_threshold": 0.03,
+            "transaction_cost": 0.0005,
+            "correlation_threshold": 0.8,
+            "lookback_period": 150,
+            "z_score_threshold": 1.8,
+            "max_position_hold_time": 12
+          },
+          "exchanges": {
+            "binance": { "enabled": true, "sandbox": true },
+            "bybit":   { "enabled": true, "sandbox": true },
+            "kucoin":  { "enabled": true, "sandbox": true }
+          },
+        "pairs":  [
+            ["BTCUSDT","ETHUSDT"],
+            ["SOLUSDT","AVAXUSDT"],
+            ["LINKUSDT","ATOMUSDT"],
+            ["ADAUSDT","MATICUSDT"]
+          ],
         "correlation_threshold": 0.8,
         "spread_threshold": 0.0008,
         "lookback_period": 100,

@@ -22,9 +22,6 @@ _ALIAS_MAP = {
     "RNDR/USDT": "RNDRUSDT",
 }
 
-def _normalize_symbol(sym: str) -> str:
-    s = sym.replace("/", "").upper()
-    return _ALIAS_MAP.get(s, s)
 
 
 class PaperTradingEngine:
@@ -199,6 +196,7 @@ class ExchangeManager:
         self.is_paper_trading = config.is_paper_trading
         self.exchange_info: Dict = {}
         self.rate_limiter = asyncio.Semaphore(10)  # Max 10 concurrent requests
+        self.tickers: Dict[str, float] = {}  # local price cache for resilience
         
     async def initialize(self):
         """Initialize exchange connection"""
@@ -501,81 +499,95 @@ class ExchangeManager:
         except Exception as e:
             logger.error(f"Failed to get positions: {e}")
             return []
-    
-# a few lines above for context
-    async def get_current_price(self, symbol: str) -> Optional[float]:
-        """Get current market price for a symbol (use exchange ticker even in paper mode)."""
-        ex_symbol = self._to_exchange_symbol(symbol)
 
-        # 1) Try once
+    def _normalize_symbol(sym: str) -> str:
+        """
+        Normalize 'rnDr-usdt' -> 'RNDRUSDT'. If 'BASE/QUOTE' is provided,
+        return 'BASEQUOTE' (we'll add the slash back via _to_exchange_symbol).
+        """
+        s = sym.strip().upper().replace('-', '').replace('_', '')
+        if '/' in s:
+            base, quote = s.split('/', 1)
+            return f"{base}{quote}"
+        return s
+
+
+    # REPLACE the whole function with this
+    async def get_current_price(self, symbol: str) -> Optional[float]:
+        """
+        Robust current price fetch:
+        1) fetch_ticker on normalized symbol
+        2) reload markets and retry once (helps when RNDR wasn’t in the cache)
+        3) paper-mode fallbacks (positions / recent trade history)
+        4) local cache & final REST retry
+        """
+        sym = _normalize_symbol(symbol)
+        ex_symbol = self._to_exchange_symbol(sym)  # e.g. RNDRUSDT -> RNDR/USDT
+
+        # 1) First attempt
         try:
             async with self.rate_limiter:
                 ticker = await self.exchange.fetch_ticker(ex_symbol)
-            price = ticker.get('last') or (
-                ((ticker.get('bid') or 0) + (ticker.get('ask') or 0)) / 2
-                if (ticker.get('bid') and ticker.get('ask')) else None
+            price = ticker.get("last") or (
+                ((ticker.get("bid") or 0) + (ticker.get("ask") or 0)) / 2
+                if (ticker.get("bid") and ticker.get("ask")) else None
             )
             if price and price > 0:
+                # cache both forms to speed up future reads
+                self.tickers[sym] = float(price)
+                self.tickers[ex_symbol] = float(price)
                 return float(price)
         except Exception as e:
             logger.debug(f"First ticker fetch failed for {ex_symbol}: {e}")
 
-        # 2) Reload markets and retry once (fixes cases like RNDR not in current markets)
+        # 2) Reload markets and retry (fixes cases like RNDR missing)
         try:
             async with self.rate_limiter:
                 await self.exchange.load_markets(reload=True)
                 ticker = await self.exchange.fetch_ticker(ex_symbol)
-            price = ticker.get('last') or (
-                ((ticker.get('bid') or 0) + (ticker.get('ask') or 0)) / 2
-                if (ticker.get('bid') and ticker.get('ask')) else None
+            price = ticker.get("last") or (
+                ((ticker.get("bid") or 0) + (ticker.get("ask") or 0)) / 2
+                if (ticker.get("bid") and ticker.get("ask")) else None
             )
             if price and price > 0:
+                self.tickers[sym] = float(price)
+                self.tickers[ex_symbol] = float(price)
                 return float(price)
         except Exception as e:
             logger.warning(f"Price fetch failed for {symbol} after markets reload: {e}")
 
-        # 3) Fallbacks for resilience in paper mode (your existing behavior)
+        # 3) Paper-mode fallbacks: use known in-memory price points if available
         try:
             if self.paper_engine:
-                pos = self.paper_engine.positions.get(symbol)
+                pos = self.paper_engine.positions.get(sym)
                 if pos and pos.get("price"):
                     return float(pos["price"])
                 for o in reversed(self.paper_engine.trade_history):
-                    if o.get("symbol") == symbol and o.get("price"):
+                    if o.get("symbol") == sym and o.get("price"):
                         return float(o["price"])
         except Exception:
             pass
 
+        # 4) Local cache → final REST retry
+        cached = self.tickers.get(sym) or self.tickers.get(ex_symbol)
+        if cached:
+            return float(cached)
 
-        sym = _normalize_symbol(symbol)
-
-        # 1) try local cache (both with and without slash)
-        price = None
-        if hasattr(self, 'tickers'):
-            price = self.tickers.get(sym) or self.tickers.get(sym.replace("USDT", "/USDT"))
-
-        if price:
-            return float(price)
-
-        # 2) robust fallback via REST ticker
         try:
+            # last-ditch: REST once more using unified slash form
             unified = sym if "/" in sym else sym.replace("USDT", "/USDT")
-            ticker = await self.exchange.fetch_ticker(unified)
+            async with self.rate_limiter:
+                ticker = await self.exchange.fetch_ticker(unified)
             last = ticker.get("last") or ticker.get("close") or ticker.get("bid") or ticker.get("ask")
             if last:
                 last = float(last)
-                # cache both forms so future reads are fast
-                if hasattr(self, 'tickers'):
-                    self.tickers[sym] = last
-                    self.tickers[unified] = last
+                self.tickers[sym] = last
+                self.tickers[unified] = last
                 return last
         except Exception as e:
-            self.logger.warning(f"Price fetch fallback failed for {symbol}: {e}")
+            logger.warning(f"Final price fetch fallback failed for {symbol}: {e}")
 
         return None
-
-
-
 
 
     

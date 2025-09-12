@@ -251,42 +251,36 @@ class ArbitrageStrategy(BaseStrategy):
             best_opportunity = None
             max_profit = 0
             
-            for buy_exchange, buy_price in prices.items():
-                for sell_exchange, sell_price in prices.items():
-                    if buy_exchange == sell_exchange:
+            for buy_ex, buy_px in prices.items():
+                for sell_ex, sell_px in prices.items():
+                    if buy_ex == sell_ex:
                         continue
-                    
-                    # Calculate potential profit
-                    buy_cost = buy_price['ask']  # We buy at ask price
-                    sell_revenue = sell_price['bid']  # We sell at bid price
-                    
-                    if buy_cost > 0 and sell_revenue > 0:
-                        # Track best observed normalized spread for diagnostics
-                        try:
-                            mid = (buy_cost + sell_revenue) / 2.0
-                            spread_ratio = abs(sell_revenue - buy_cost) / mid if mid else 0.0
-                            self._last_spread = max(getattr(self, "_last_spread", 0.0), float(spread_ratio))
-                        except Exception:
-                            pass
-                    
-                        gross_profit = (sell_revenue - buy_cost) / buy_cost
-                        net_profit = gross_profit - self.arb_config.transaction_cost
-                        
-                        if (net_profit > self.arb_config.min_spread_threshold and 
-                            net_profit < self.arb_config.max_spread_threshold and
-                            net_profit > max_profit):
-                            
-                            max_profit = net_profit
-                            best_opportunity = {
-                                'type': 'cross_exchange',
-                                'buy_exchange': buy_exchange,
-                                'sell_exchange': sell_exchange,
-                                'buy_price': buy_cost,
-                                'sell_price': sell_revenue,
-                                'spread': gross_profit,
-                                'net_profit': net_profit,
-                                'confidence': min(net_profit * 20, 1.0)  # Scale to 0-1
-                            }
+
+                    buy_cost = float(buy_px.get("ask") or buy_px.get("last") or 0.0)
+                    sell_rev = float(sell_px.get("bid") or sell_px.get("last") or 0.0)
+                    if buy_cost <= 0.0 or sell_rev <= 0.0:
+                        continue
+
+                    # Track best observed normalized spread for diagnostics
+                    mid = (buy_cost + sell_rev) / 2.0
+                    if mid > 0:
+                        spread_ratio = abs(sell_rev - buy_cost) / mid
+                        self._last_spread = max(getattr(self, "_last_spread", 0.0), spread_ratio)
+
+                    gross_profit = (sell_rev - buy_cost) / buy_cost
+                    net_profit = gross_profit - float(self.arb_config.transaction_cost)
+
+                    if (self.arb_config.min_spread_threshold < net_profit < self.arb_config.max_spread_threshold
+                        and net_profit > max_profit):
+                        max_profit = net_profit
+                        best_opportunity = {
+                            "type": "cross_exchange",
+                            "buy_exchange": buy_ex, "sell_exchange": sell_ex,
+                            "buy_price": buy_cost, "sell_price": sell_rev,
+                            "spread": gross_profit, "net_profit": net_profit,
+                            "confidence": min(net_profit * 20.0, 1.0)
+                        }
+
 
             # ... after you have the two effective prices for this symbol:
             if buy_price and sell_price:
@@ -313,13 +307,30 @@ class ArbitrageStrategy(BaseStrategy):
             return None
     
     async def _fetch_ticker(self, exchange, symbol: str) -> Optional[Dict]:
-        """Fetch ticker data from exchange"""
+        """Fetch ticker data from exchange (normalize symbol, robust fields)."""
         try:
-            ticker = exchange.fetch_ticker(symbol)
-            return ticker
+            # Normalize e.g. BTCUSDT -> BTC/USDT, ETHUSDC -> ETH/USDC
+            if "/" not in symbol and symbol.endswith(("USDT", "USD", "USDC")):
+                base = symbol[:-4] if symbol.endswith("USDT") else symbol[:-3]
+                quote = symbol[-4:] if symbol.endswith("USDT") else symbol[-3:]
+                symbol = f"{base}/{quote}"
+
+            t = exchange.fetch_ticker(symbol)
+
+            # Some exchanges omit bid/ask; derive from last where possible
+            bid = t.get("bid")
+            ask = t.get("ask")
+            last = t.get("last")
+            if (bid is None or bid <= 0) and last:
+                bid = float(last)
+            if (ask is None or ask <= 0) and last:
+                ask = float(last)
+
+            return {"bid": bid, "ask": ask, "timestamp": t.get("timestamp", t.get("datetime")), **t}
         except Exception as e:
             logger.warning(f"Failed to fetch ticker for {symbol}: {e}")
             return None
+
     
     async def _check_statistical_arbitrage(self, symbol: str, data: pd.DataFrame) -> Optional[Dict[str, Any]]:
         """Check for statistical arbitrage opportunities (pairs trading)"""

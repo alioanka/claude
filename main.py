@@ -83,8 +83,13 @@ class TradingBotApplication:
                     self.bot.portfolio_manager.db_manager,
                     self.bot.portfolio_manager
                 )
-#                dashboard.trade_executor = bot.trade_executor
-#                dashboard.bot = bot
+
+                # --- WIRING so /api/positions/{symbol}/close & close_all work ---
+                # These two lines are the key fix for:
+                # “Close failed: trade_executor not wired to DashboardManager”
+                self.dashboard_manager.trade_executor = self.bot.trade_executor
+                self.dashboard_manager.bot = self.bot
+
                 logger.info("✅ Dashboard manager initialized")
             except Exception as e:
                 logger.warning(f"⚠️ Dashboard manager failed to initialize: {e}")

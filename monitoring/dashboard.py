@@ -550,15 +550,81 @@ class DashboardManager:
 
 
                 // --- timeframe controls (non-breaking) ---
-                let rawPoints = [];            // [{ts: number, val: number}]
-                let dataWindowMs = 5 * 60 * 1000; // default 5m
-                const TF_BUCKETS = { '1m':60e3, '5m':5*60e3, '15m':15*60e3, '1h':60*60e3, '1d':24*60*60e3, '7d':7*24*60*60e3 };
+                // --- timeframe controls (fixed bucketing) ---
+                let rawPoints = []; // [{ts: number, val: number}]
+
+                // View windows per TF (how much history to show)
+                const TF_WINDOW = {
+                '1m':  5 * 60_000,      // show last 5 minutes
+                '5m':  30 * 60_000,     // show last 30 minutes
+                '15m': 2 * 60 * 60_000, // last 2 hours
+                '1h':  12 * 60 * 60_000,// last 12 hours
+                '1d':  3 * 24 * 60 * 60_000, // last 3 days
+                '7d':  7 * 24 * 60 * 60_000, // last 7 days
+                'all': Number.POSITIVE_INFINITY
+                };
+
+                // Bucket sizes per TF (should be ≪ window to avoid 1–2 labels)
+                const TF_BUCKET = {
+                '1m':  5_000,        // 5s buckets
+                '5m':  15_000,       // 15s buckets
+                '15m': 60_000,       // 1m buckets
+                '1h':  5 * 60_000,   // 5m buckets
+                '1d':  30 * 60_000,  // 30m buckets
+                '7d':  2 * 60 * 60_000, // 2h buckets
+                'all': 0             // no bucketing for 'all'
+                };
 
                 function resampleAndRender(tf) {
-                const TF_BUCKETS = { '1m':60_000, '5m':300_000, '15m':900_000, '1h':3_600_000, '1d':86_400_000, '7d':7*86_400_000 };
                 const now = Date.now();
-                const windowMs = (tf === 'all') ? Number.POSITIVE_INFINITY : (TF_BUCKETS[tf] ?? 300_000);
-                const bucket = (tf === 'all') ? 0 : (TF_BUCKETS[tf] ?? 300_000);
+                const windowMs = TF_WINDOW[tf] ?? 30 * 60_000;  // default 30m
+                const bucketMs = TF_BUCKET[tf] ?? 15_000;       // default 15s
+
+                // 1) filter to timeframe
+                let filtered = (tf === 'all')
+                    ? rawPoints.slice()
+                    : rawPoints.filter(p => (now - p.ts) <= windowMs);
+
+                // 2) bucketize: keep the LAST point in each time bucket
+                let out;
+                if (bucketMs > 0 && filtered.length > 1) {
+                    const map = new Map();
+                    for (const p of filtered) {
+                    const k = Math.floor(p.ts / bucketMs);
+                    // keep the latest sample in each bucket
+                    const prev = map.get(k);
+                    if (!prev || p.ts > prev.ts) map.set(k, p);
+                    }
+                    out = Array.from(map.values()).sort((a,b) => a.ts - b.ts);
+                } else {
+                    out = filtered.slice();
+                }
+
+                // 3) ensure ≥2 points for a visible line
+                if (out.length === 1) {
+                    out = [{ ts: out[0].ts - Math.max(5_000, bucketMs || 5_000), val: out[0].val }, out[0]];
+                } else if (out.length === 0 && rawPoints.length) {
+                    const last = rawPoints[rawPoints.length - 1];
+                    out = [{ ts: last.ts - Math.max(5_000, bucketMs || 5_000), val: last.val }, last];
+                }
+
+                // 4) apply to chart
+                const labels = out.map(p => new Date(p.ts).toLocaleTimeString());
+                const data = out.map(p => p.val);
+                portfolioChart.data.labels = labels;
+                portfolioChart.data.datasets[0].data = data;
+
+                // 5) sensible y-range padding
+                if (data.length) {
+                    const min = Math.min(...data), max = Math.max(...data);
+                    const pad = Math.max(1, (max - min) * 0.002);
+                    portfolioChart.options.scales.y.suggestedMin = min - pad;
+                    portfolioChart.options.scales.y.suggestedMax = max + pad;
+                }
+
+                portfolioChart.update();
+                }
+
 
                 // 1) filter to timeframe
                 let filtered = rawPoints.filter(p => (tf === 'all') || (now - p.ts <= windowMs));

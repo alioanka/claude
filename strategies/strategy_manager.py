@@ -72,19 +72,26 @@ class StrategyManager:
             logger.info("🎯 Initializing Strategy Manager...")
             
             # Initialize available strategies
+            # Initialize available strategies
             await self.load_strategies()
-            # Normalize allocation over loaded & enabled strategies (so 0.0 weights don't block everything)
+
+            # Normalize allocation strictly over enabled & loaded strategies
             active_names = [name for name, strat in self.strategies.items() if getattr(strat, "enabled", True)]
             total_alloc = sum(max(0.0, float(self.strategy_allocation.get(n, 0.0))) for n in active_names)
-            if total_alloc <= 0 and active_names:
-                # fallback: equal weight
-                equal = round(1.0 / len(active_names), 6)
-                self.strategy_allocation = {n: equal for n in active_names}
-                logger.info(f"⚖️ Strategy allocation normalized to equal weights: {self.strategy_allocation}")
-            elif active_names:
-                self.strategy_allocation = {n: float(self.strategy_allocation.get(n, 0.0))/total_alloc for n in active_names}
-                logger.info(f"⚖️ Strategy allocation normalized: {self.strategy_allocation}")
-                    
+
+            if total_alloc <= 0:
+                # fallback: equal-weight active strategies
+                equal = 1.0 / max(1, len(active_names))
+                self.strategy_allocation = {n: (equal if n in active_names else 0.0) for n in self.strategies.keys()}
+            else:
+                # rescale only active strategies; keep disabled at 0.0
+                self.strategy_allocation = {
+                    n: (max(0.0, float(self.strategy_allocation.get(n, 0.0))) / total_alloc if n in active_names else 0.0)
+                    for n in self.strategies.keys()
+                }
+
+            logger.info(f"📊 Strategy allocation normalized over active set: {self.strategy_allocation}")
+                            
             # Set initial performance metrics
             for strategy_name in self.strategies:
                 self.strategy_performance[strategy_name] = {

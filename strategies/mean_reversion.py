@@ -171,28 +171,28 @@ class MeanReversionStrategy(BaseStrategy):
             if 'close' in recent_data.columns:
                 price_change = (recent_data['close'].iloc[-1] - recent_data['close'].iloc[0]) / recent_data['close'].iloc[0]
                 
-                # Avoid strong trends (threshold: 5% over 20 periods)
-                if abs(price_change) > 0.05:
-                    logger.debug("Market trending too strongly for mean reversion")
-                    return False
-            
-            # Check volatility (need some volatility for mean reversion opportunities)
+            # Allow a bit more drift in “ranging” markets: 8% over 20 bars
+            if abs(price_change) > 0.08:
+                logger.debug("Market trending too strongly for mean reversion")
+                return False
+
+            # Volatility: slightly wider gate so we don’t starve signals on quiet pairs
             if 'atr' in df.columns:
                 recent_atr = df['atr'].tail(10).mean()
                 current_price = df['close'].iloc[-1]
                 volatility_pct = (recent_atr / current_price) * 100
-                
-                # Need minimum volatility (0.5%) but not too high (8%)
-                if volatility_pct < 0.3 or volatility_pct > 12.0:
+                # 0.2% – 15%
+                if volatility_pct < 0.2 or volatility_pct > 15.0:
                     logger.debug(f"Volatility unsuitable for mean reversion: {volatility_pct:.2f}%")
                     return False
-            
-            # Check Bollinger Band width (need sufficient width)
+
+            # BB width: fix comment mismatch; require ≥ 2%
             if 'bb_width' in df.columns:
                 recent_bb_width = df['bb_width'].tail(5).mean()
-                if recent_bb_width < 0.008:  # Less than 2%
+                if recent_bb_width < 0.02:  # Less than 2%
                     logger.debug("Bollinger Bands too narrow for mean reversion")
                     return False
+
             
             return True
             

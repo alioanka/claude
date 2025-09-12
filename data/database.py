@@ -363,9 +363,8 @@ class DatabaseManager:
             return []
 
 
-    # --- add below inside DatabaseManager (near other getters) ---
     def get_recent_trades(self, limit: int = 50) -> list[dict]:
-        """Return the most recent trades as plain dicts for the dashboard."""
+        """Return the most recent trades as plain dicts for the dashboard (robust)."""
         session = None
         try:
             session = self.get_session()
@@ -375,13 +374,40 @@ class DatabaseManager:
                 .limit(limit)
                 .all()
             )
-            return [t.to_dict() for t in rows]
+
+            out = []
+            for t in rows:
+                if hasattr(t, "to_dict"):
+                    d = t.to_dict()
+                else:
+                    # Fallback serializer (keeps dashboard stable even if model changes)
+                    ts = t.timestamp.isoformat() if getattr(t, "timestamp", None) else None
+                    total = (float(getattr(t, "size", 0.0)) * float(getattr(t, "price", 0.0))) + float(getattr(t, "fee", 0.0))
+                    d = {
+                        "id": getattr(t, "id", None),
+                        "position_id": getattr(t, "position_id", None),
+                        "symbol": getattr(t, "symbol", ""),
+                        "side": getattr(t, "side", ""),
+                        "size": float(getattr(t, "size", 0.0)),
+                        "price": float(getattr(t, "price", 0.0)),
+                        "fee": float(getattr(t, "fee", 0.0)),
+                        "timestamp": ts,
+                        "exchange_order_id": getattr(t, "exchange_order_id", None),
+                        "status": getattr(t, "status", ""),
+                        "strategy": getattr(t, "strategy", ""),
+                        "notes": getattr(t, "notes", None),
+                        "total_value": float(total),
+                    }
+                out.append(d)
+            return out
+
         except Exception as e:
             logger.error(f"Failed to get recent trades: {e}")
             return []
         finally:
             if session:
                 session.close()
+
 
 
 
