@@ -22,6 +22,9 @@ _ALIAS_MAP = {
     "RNDR/USDT": "RNDRUSDT",
 }
 
+def _normalize_symbol(sym: str) -> str:
+    s = sym.replace("/", "").upper()
+    return _ALIAS_MAP.get(s, s)
 
 
 class PaperTradingEngine:
