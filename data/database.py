@@ -731,6 +731,52 @@ class DatabaseManager:
                 session.rollback()
                 session.close()
             return False
+
+    # ADD inside DatabaseManager
+    def close_position_by_symbol(self, symbol: str, exit_price: float, realized_pnl: float = 0.0, closed_at=None) -> bool:
+        """
+        Backward-compat wrapper used by PortfolioManager.
+        Looks up the latest OPEN position by symbol and marks it closed.
+        """
+        session = None
+        try:
+            session = self.get_session()
+            from datetime import datetime
+            closed_at = closed_at or datetime.utcnow()
+
+            pos = (
+                session.query(Position)
+                .filter(Position.symbol == symbol, Position.is_open == True)
+                .order_by(Position.created_at.desc())
+                .first()
+            )
+            if not pos:
+                return False
+
+            # update fields similar to your existing close_position()
+            pos.closing_price = float(exit_price)
+            pos.pnl = float(realized_pnl)
+            try:
+                # if you track % pnl in DB, compute it defensively
+                pos.pnl_percentage = (pos.pnl / (pos.entry_price * pos.size)) * 100.0 if pos.entry_price and pos.size else 0.0
+            except Exception:
+                pass
+
+            pos.is_open = False
+            pos.closed_at = closed_at
+            pos.updated_at = closed_at
+
+            session.commit()
+            return True
+        except Exception as e:
+            logger.warning(f"close_position_by_symbol failed for {symbol}: {e}")
+            if session:
+                session.rollback()
+            return False
+        finally:
+            if session:
+                session.close()
+
     
     async def get_performance_stats(self, days: int = 30) -> Dict[str, Any]:
         """Get performance statistics"""
