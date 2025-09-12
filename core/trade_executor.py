@@ -149,10 +149,10 @@ class TradeExecutor:
         start_time = time.time()
         
         try:
-            trade_logger.log_trade_entry(
-                signal.symbol, signal.side, signal.amount, 
-                signal.entry_price or 0, signal.strategy_name
-            )
+#            trade_logger.log_trade_entry(
+#                signal.symbol, signal.side, signal.amount, 
+#                signal.entry_price or 0, signal.strategy_name
+#            )
             
             # Pre-execution validation
             validation_result = await self.validate_signal(signal)

@@ -351,19 +351,24 @@ class PortfolioManager:
     
     async def update_position_prices(self):
         """Update current prices for all positions"""
+async def update_position_prices(self):
+    """Update current prices for all positions"""
         try:
-            for symbol, position in self.positions.items():
-                # Get current market price
+            # iterate over a stable view
+            items = list(self.positions.items())
+            for symbol, position in items:
                 current_price = await self.exchange_manager.get_current_price(symbol)
                 if current_price:
-                    position.current_price = current_price
+                    position.current_price = float(current_price)
                     position.update_current_value()
-            
-            # Update portfolio metrics
+
+            # Update portfolio metrics once at the end
             await self.calculate_portfolio_metrics()
-            
+            return True
         except Exception as e:
             logger.error(f"❌ Failed to update position prices: {e}")
+            return False
+
 
         try:
             # iterate over a *stable* list, not the live dict

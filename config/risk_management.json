@@ -35,8 +35,8 @@
       "correlation_threshold": 0.7
     },
     "market_conditions": {
-      "bull_market_max_positions": 10,
-      "bear_market_max_positions": 5,
-      "sideways_market_max_positions": 7
+      "bull_market_max_positions": 15,
+      "bear_market_max_positions": 6,
+      "sideways_market_max_positions": 8
     }
   }
