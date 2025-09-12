@@ -135,52 +135,70 @@ class DashboardManager:
             }
     
     async def get_positions_data(self) -> List[Dict[str, Any]]:
-        """Get current positions with live PnL from PortfolioManager (authoritative)."""
+        """Get current positions with live PnL using PortfolioManager's in-memory prices."""
         try:
-            # ensure PM has fresh prices
-            await self.portfolio_manager.update_position_prices()
+            # DB positions (authoritative for what's open)
+            positions = await self.db.get_open_positions()
+            # In-memory positions (have live current_price)
             live_positions = getattr(self.portfolio_manager, "positions", {}) or {}
 
             out: List[Dict[str, Any]] = []
-            for sym, pos in live_positions.items():
-                # compute values from the in-memory object:
-                item = {
-                    "symbol": pos.symbol,
-                    "side": pos.side,
-                    "size": round(float(pos.amount), 6),     # dashboard expects 'size'
-                    "entry_price": float(pos.entry_price),
-                    "current_price": float(pos.current_price),
-                    "pnl": round(float(pos.unrealized_pnl), 2),
-                    "pnl_percentage": round(float(pos.unrealized_pnl_pct), 2),
-                    "strategy": getattr(pos, "strategy", "unknown")
-                }
-                out.append(item)
+            for pos in positions:
+                d = pos.to_dict()
+                sym = d.get("symbol")
+                side = str(d.get("side") or "").lower()
+                size = float(d.get("size") or 0.0)
+                entry = float(d.get("entry_price") or 0.0)
+
+                # Prefer the in-memory, up-to-date price
+                live = live_positions.get(sym)
+                if live and getattr(live, "current_price", None):
+                    cur = float(live.current_price)
+                else:
+                    cur = float(d.get("current_price") or entry)
+
+                # Recompute PnL on the fly
+                if size > 0.0 and entry > 0.0 and cur > 0.0:
+                    if side in ("long", "buy"):
+                        pnl = (cur - entry) * size
+                        pnl_pct = (cur - entry) / entry * 100.0
+                    else:  # short/sell
+                        pnl = (entry - cur) * size
+                        pnl_pct = (entry - cur) / entry * 100.0
+                else:
+                    pnl = float(d.get("pnl") or 0.0)
+                    pnl_pct = float(d.get("pnl_percentage") or 0.0)
+
+                d["current_price"] = cur
+                d["pnl"] = round(pnl, 2)
+                d["pnl_percentage"] = round(pnl_pct, 2)
+                d["strategy"] = d.get("strategy") or "unknown"
+                out.append(d)
+
             return out
         except Exception as e:
             logger.error(f"Failed to get positions data: {e}")
             return []
 
-
     
     async def get_performance_data(self) -> Dict[str, Any]:
-        """Get performance metrics (DB if present, enriched with PortfolioManager stats)."""
+        """Get performance metrics"""
         try:
-            db_stats = await self.db.get_performance_stats() if hasattr(self.db, "get_performance_stats") else {}
-            pm_stats = self.portfolio_manager.get_portfolio_statistics()
-
-            # Prefer in-memory truth for dynamic metrics; fall back to DB if missing
+            stats = await self.db.get_performance_stats()
+            
+            # Add additional metrics
+            portfolio_value = await self.portfolio_manager.get_total_value()
+            daily_pnl = await self.get_daily_pnl()
+            
             return {
-                'portfolio_value': await self.portfolio_manager.get_total_value(),
-                'daily_pnl': pm_stats.get('daily_pnl', 0.0),
-                'total_pnl': getattr(self.portfolio_manager, 'total_pnl', 0.0),
-                'total_trades': pm_stats.get('total_trades', db_stats.get('total_trades', 0)),
-                'win_rate': pm_stats.get('win_rate_pct', 0.0),
+                **stats,
+                'portfolio_value': portfolio_value,
+                'daily_pnl': daily_pnl,
                 'last_updated': datetime.utcnow().isoformat()
             }
         except Exception as e:
             logger.error(f"Failed to get performance data: {e}")
             return {}
-
     
     async def get_trades_data(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Get recent trades data"""
@@ -233,16 +251,11 @@ class DashboardManager:
 
             # monitoring/dashboard.py (inside the log-fallback branch of get_rejections_data)
 
-            # --- LOG FALLBACK with rotation awareness ---
-            import os, re, glob
+            import os, re, datetime
             from datetime import datetime, timezone
 
-            log_files = sorted(
-                glob.glob(os.path.join("logs", "trading_bot.log*")),
-                key=lambda p: os.path.getmtime(p),
-                reverse=True
-            )
-            if not log_files:
+            path = os.path.join("logs", "trading_bot.log")
+            if not os.path.exists(path):
                 return []
 
             pattern = re.compile(
@@ -250,38 +263,35 @@ class DashboardManager:
             )
 
             items = []
-            for path in log_files:
-                try:
-                    with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                        for line in f:
-                            m = pattern.search(line)
-                            if not m:
-                                continue
-                            d = m.groupdict()
-                            try:
-                                dt = datetime.strptime(d["ts"], "%Y-%m-%d %H:%M:%S,%f").replace(tzinfo=timezone.utc)
-                                ts_iso = dt.isoformat()
-                                ts_epoch = int(dt.timestamp() * 1000)
-                            except Exception:
-                                ts_iso, ts_epoch = d["ts"], None
-                            items.append({
-                                "timestamp": ts_iso,
-                                "ts_epoch": ts_epoch,
-                                "strategy": d["strategy"],
-                                "symbol": d["symbol"],
-                                "reason": d["reason"].strip(),
-                                "confidence": float(d["conf"]),
-                            })
-                            if len(items) >= limit:
-                                break
-                except Exception as _e:
-                    logger.warning(f"could not read {path}: {_e}")
-                if len(items) >= limit:
-                    break
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    m = pattern.search(line)
+                    if not m:
+                        continue
+                    d = m.groupdict()
 
+                    # Convert "YYYY-MM-DD HH:MM:SS,mmm" -> ISO8601 + epoch ms
+                    try:
+                        dt = datetime.strptime(d["ts"], "%Y-%m-%d %H:%M:%S,%f").replace(tzinfo=timezone.utc)
+                        ts_iso = dt.isoformat()            # e.g. "2025-09-07T20:19:03.074+00:00"
+                        ts_epoch = int(dt.timestamp() * 1000)
+                    except Exception:
+                        # Fallback to raw string if parsing ever fails
+                        ts_iso = d["ts"]
+                        ts_epoch = None
+
+                    items.append({
+                        "timestamp": ts_iso,               # browser-friendly
+                        "ts_epoch": ts_epoch,              # number for charts/sorting
+                        "strategy": d["strategy"],
+                        "symbol": d["symbol"],
+                        "reason": d["reason"].strip(),
+                        "confidence": float(d["conf"]),
+                    })
+
+            # newest first by epoch if available
             items.sort(key=lambda x: x.get("ts_epoch") or x["timestamp"], reverse=True)
             return items[:limit]
-
 
 
         except Exception as e:

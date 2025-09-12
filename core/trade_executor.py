@@ -726,6 +726,28 @@ class TradeExecutor:
                 removed_position = await self.portfolio_manager.remove_position(
                     symbol, result.executed_price
                 )
+
+                # PATCH ⬇ Persist exit trade if DB exposes a saver (no-breaking)
+                try:
+                    trade_data = {
+                        "symbol": symbol,
+                        "side": close_side,
+                        "size": float(result.executed_amount),
+                        "price": float(result.executed_price),
+                        "fee": float(getattr(result, 'commission', 0.0)),
+                        "timestamp": datetime.utcnow(),
+                        "exchange_order_id": result.order_id or "",
+                        "status": "exit",
+                        "strategy": (getattr(removed_position, "strategy", None) or "position_close"),
+                        "notes": json.dumps({"reason": "manual_close" })
+                    }
+                    if hasattr(self.db_manager, 'save_trade'):
+                        await self.db_manager.save_trade(trade_data)
+                    elif hasattr(self.db_manager, 'store_trade'):
+                        await self.db_manager.store_trade(trade_data)
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to persist exit trade for {symbol}: {e}")
+                # /PATCH
                 
                 if removed_position:
                     trade_logger.log_trade_exit(

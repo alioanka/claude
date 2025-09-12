@@ -26,6 +26,7 @@ class PortfolioPosition:
     entry_price: float
     current_price: float
     timestamp: datetime
+    strategy: str = "unknown"
     unrealized_pnl: float = 0.0
     unrealized_pnl_pct: float = 0.0
     entry_value: float = field(init=False)
@@ -59,7 +60,8 @@ class PortfolioPosition:
             'current_value': self.current_value,
             'unrealized_pnl': self.unrealized_pnl,
             'unrealized_pnl_pct': self.unrealized_pnl_pct,
-            'timestamp': self.timestamp.isoformat()
+            'timestamp': self.timestamp.isoformat(),
+            'strategy': self.strategy
         }
 
 @dataclass
@@ -152,7 +154,8 @@ class PortfolioManager:
                         amount=pos_data['amount'],
                         entry_price=pos_data['entry_price'],
                         current_price=current_price,
-                        timestamp=datetime.fromtimestamp(pos_data['timestamp'] / 1000)
+                        timestamp=datetime.fromtimestamp(pos_data['timestamp'] / 1000),
+                        strategy=pos_data.get('strategy', 'unknown')
                     )
                     
                     self.positions[pos_data['symbol']] = position
@@ -244,7 +247,8 @@ class PortfolioManager:
                 amount=amount,
                 entry_price=entry_price,
                 current_price=current_price,
-                timestamp=datetime.utcnow()
+                timestamp=datetime.utcnow(),
+                strategy=strategy
             )
             self.positions[symbol] = position
 
@@ -305,6 +309,35 @@ class PortfolioManager:
             
             # Remove from active positions
             removed_position = self.positions.pop(symbol)
+
+            # PATCH ⬇ Best-effort persist closure without breaking existing DB layer
+            try:
+                if hasattr(self.db_manager, 'close_position'):
+                    await self.db_manager.close_position(
+                        symbol=symbol,
+                        exit_price=float(exit_price),
+                        realized_pnl=float(position.unrealized_pnl),
+                        closed_at=datetime.utcnow()
+                    )
+                elif hasattr(self.db_manager, 'mark_position_closed'):
+                    await self.db_manager.mark_position_closed(
+                        symbol=symbol,
+                        exit_price=float(exit_price),
+                        realized_pnl=float(position.unrealized_pnl)
+                    )
+                elif hasattr(self.db_manager, 'update_position'):
+                    await self.db_manager.update_position(
+                        symbol,
+                        {
+                            'is_open': False,
+                            'exit_price': float(exit_price),
+                            'pnl': float(position.unrealized_pnl),
+                            'closed_at': datetime.utcnow()
+                        }
+                    )
+            except Exception as _db_close_err:
+                logger.warning(f"⚠️ Could not mark {symbol} closed in DB: {_db_close_err}")
+            # /PATCH
             
             # Update metrics
             await self.calculate_portfolio_metrics()
