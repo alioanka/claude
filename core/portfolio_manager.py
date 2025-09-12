@@ -313,7 +313,7 @@ class PortfolioManager:
             # PATCH ⬇ Best-effort persist closure without breaking existing DB layer
             try:
                 if hasattr(self.db_manager, 'close_position'):
-                    await self.db_manager.close_position_by_symbol(
+                    self.db_manager.close_position_by_symbol(
                         symbol,
                         exit_price=float(exit_price),
                         realized_pnl=float(position.unrealized_pnl),
