@@ -643,13 +643,16 @@ class TradeExecutor:
                 "price": float(result.executed_price),
                 "fee": float(getattr(result, "commission", 0.0)),
                 "timestamp": datetime.utcnow(),
-                "exchange_order_id": result.order_id or "",
+                "exchange_order_id": str(result.order_id) if getattr(result, "order_id", None) else None,
                 "status": "filled" if result.success else "failed",
-                "strategy": signal.strategy_name or "unknown",
+                "strategy": getattr(signal, "strategy_name", getattr(signal, "strategy", "unknown")),
                 "notes": json.dumps(getattr(signal, "features", None) or {}),
             }
-            await self.db_manager.save_trade(trade_data)
-
+            
+            try:
+                await self.db_manager.save_trade(trade_data)
+            except Exception as e:
+                self.logger.error(f"❌ Post-execution processing failed (save_trade): {e}")
             # Portfolio position (store strategy explicitly)
             await self.portfolio_manager.add_position(
                 symbol=signal.symbol,

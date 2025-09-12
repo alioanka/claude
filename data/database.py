@@ -365,7 +365,7 @@ class DatabaseManager:
 
     # --- add below inside DatabaseManager (near other getters) ---
     def get_recent_trades(self, limit: int = 50) -> list[dict]:
-        """Return the most recent trades (newest first) as plain dicts."""
+        """Return the most recent trades as plain dicts for the dashboard."""
         session = None
         try:
             session = self.get_session()
@@ -382,6 +382,7 @@ class DatabaseManager:
         finally:
             if session:
                 session.close()
+
 
 
     async def store_position(self, position) -> bool:

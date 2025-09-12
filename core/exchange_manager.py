@@ -15,6 +15,18 @@ from utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
+# --- add near imports / class defs (top-level in this module) ---
+_ALIAS_MAP = {
+    "RDNRUSDT": "RNDRUSDT",
+    "RENDERUSDT": "RNDRUSDT",
+    "RNDR/USDT": "RNDRUSDT",
+}
+
+def _normalize_symbol(sym: str) -> str:
+    s = sym.replace("/", "").upper()
+    return _ALIAS_MAP.get(s, s)
+
+
 class PaperTradingEngine:
     """Simulates trading for paper trading mode"""
     
@@ -534,7 +546,35 @@ class ExchangeManager:
         except Exception:
             pass
 
+
+        sym = _normalize_symbol(symbol)
+
+        # 1) try local cache (both with and without slash)
+        price = None
+        if hasattr(self, 'tickers'):
+            price = self.tickers.get(sym) or self.tickers.get(sym.replace("USDT", "/USDT"))
+
+        if price:
+            return float(price)
+
+        # 2) robust fallback via REST ticker
+        try:
+            unified = sym if "/" in sym else sym.replace("USDT", "/USDT")
+            ticker = await self.exchange.fetch_ticker(unified)
+            last = ticker.get("last") or ticker.get("close") or ticker.get("bid") or ticker.get("ask")
+            if last:
+                last = float(last)
+                # cache both forms so future reads are fast
+                if hasattr(self, 'tickers'):
+                    self.tickers[sym] = last
+                    self.tickers[unified] = last
+                return last
+        except Exception as e:
+            self.logger.warning(f"Price fetch fallback failed for {symbol}: {e}")
+
         return None
+
+
 
 
 

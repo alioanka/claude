@@ -13,16 +13,19 @@ from fastapi.responses import HTMLResponse
 import logging
 from data.database import DatabaseManager, Trade, Position
 from core.portfolio_manager import PortfolioManager
+from fastapi import APIRouter
 
-
+router = APIRouter()
 logger = logging.getLogger(__name__)
 
 class DashboardManager:
     """Manages the web dashboard for monitoring bot performance"""
     
-    def __init__(self, database_manager: DatabaseManager, portfolio_manager: PortfolioManager):
+    def __init__(self, database_manager: DatabaseManager, portfolio_manager: PortfolioManager, trade_executor=None, bot=None):
         self.db = database_manager
         self.portfolio_manager = portfolio_manager
+        self.trade_executor = trade_executor
+        self.bot = bot
         self.app = FastAPI(title="Crypto Trading Bot Dashboard")
         self.active_connections: List[WebSocket] = []
         self.setup_routes()
@@ -81,6 +84,42 @@ class DashboardManager:
         async def get_rejections():
             """Get recent signal/order rejections"""
             return await self.get_rejections_data()
+
+        @self.app.post("/api/positions/{symbol}/close")
+        async def api_close_position(symbol: str):
+            """
+            Close a single position via TradeExecutor if wired; otherwise
+            return a clear error without breaking anything else.
+            """
+            try:
+                if not getattr(self, "trade_executor", None):
+                    return {"ok": False, "error": "trade_executor not wired to DashboardManager"}
+                res = await self.trade_executor.close_position(symbol)
+                return {"ok": bool(getattr(res, "success", False)), "error": getattr(res, "error_message", None)}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+
+        @self.app.post("/api/positions/close_all")
+        async def api_close_all_positions():
+            """
+            Emergency exit: prefer bot.close_all_positions() if available,
+            otherwise fall back to iterating positions with trade_executor.
+            """
+            try:
+                if getattr(self, "bot", None) and hasattr(self.bot, "close_all_positions"):
+                    await self.bot.close_all_positions()
+                    return {"ok": True}
+
+                if not getattr(self, "trade_executor", None):
+                    return {"ok": False, "error": "trade_executor not wired to DashboardManager"}
+
+                positions = await self.portfolio_manager.get_positions()
+                for p in positions:
+                    await self.trade_executor.close_position(p["symbol"])
+                return {"ok": True}
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+
 
     
     async def connect(self, websocket: WebSocket):
@@ -327,6 +366,13 @@ class DashboardManager:
         <body>
             <div class="container">
                 <h1>Crypto Trading Bot Dashboard</h1>
+                <div style="margin: 10px 0 20px;">
+                  <button id="btnCloseAll" onclick="closeAllPositions()" style="padding:8px 12px; background:#f44336; color:#fff; border:none; border-radius:6px; cursor:pointer;">
+                    Emergency Close All
+                  </button>
+                </div>
+
+
                 <div id="status" class="status-running">Status: Running</div>
                 
                 <div class="metrics" id="metrics">
@@ -366,6 +412,7 @@ class DashboardManager:
                                 <th>PnL</th>
                                 <th>PnL %</th>
                                 <th>Strategy</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody id="positionsBody">
@@ -494,6 +541,7 @@ class DashboardManager:
                             <td class="${pos.pnl >= 0 ? 'positive' : 'negative'}">${pos.pnl.toFixed(2)}</td>
                             <td class="${pos.pnl_percentage >= 0 ? 'positive' : 'negative'}">${pos.pnl_percentage.toFixed(2)}%</td>
                             <td>${pos.strategy}</td>
+                            <td><button onclick="closePosition('${pos.symbol}')" style="padding:6px 10px; background:#ff9800; color:#fff; border:none; border-radius:6px; cursor:pointer;">Close</button></td>
                         </tr>
                     `).join('');
                 }
@@ -614,6 +662,69 @@ class DashboardManager:
                     resampleAndRender(sel ? sel.value : 'all');
         
                 }
+
+
+
+                async function closePosition(symbol) {
+                  try {
+                    const res = await fetch(`/api/positions/${encodeURIComponent(symbol)}/close`, { method: 'POST' });
+                    const j = await res.json();
+                    if (j.ok) {
+                      alert(`Close requested for ${symbol}`);
+                    } else {
+                      alert(`Close failed: ${j.error || 'unknown error'}`);
+                    }
+                  } catch (e) {
+                    alert('Close failed: ' + e.message);
+                  }
+                }
+
+                async function closeAllPositions() {
+                  try {
+                    const res = await fetch('/api/positions/close_all', { method: 'POST' });
+                    const j = await res.json();
+                    if (j.ok) {
+                      alert('Emergency close requested for all positions');
+                    } else {
+                      alert(`Close all failed: ${j.error || 'unknown error'}`);
+                    }
+                  } catch (e) {
+                    alert('Close all failed: ' + e.message);
+                  }
+                }
+
+
+                async function refreshTrades() {
+                  try {
+                    const res = await fetch('/api/trades');
+                    const payload = await res.json();
+                    const trades = (payload && (payload.trades || payload)) || [];
+                    const tbody = document.getElementById('tradesBody');
+                    tbody.innerHTML = trades.map(t => {
+                      const ts = new Date(t.timestamp || t.time || Date.now()).toLocaleString();
+                      const side = (t.side || '').toUpperCase();
+                      const size = Number(t.size || t.amount || 0);
+                      const price = Number(t.price || 0);
+                      const total = size * price;
+                      return `
+                        <tr>
+                          <td>${ts}</td>
+                          <td>${t.symbol || ''}</td>
+                          <td>${side}</td>
+                          <td>${size.toFixed(6)}</td>
+                          <td>${price.toFixed(4)}</td>
+                          <td>${total.toFixed(2)}</td>
+                          <td>${t.strategy || ''}</td>
+                        </tr>`;
+                    }).join('');
+                  } catch (e) {
+                    console.warn('Trades refresh failed', e);
+                  }
+                }
+
+                // poll trades every 10s + once at start
+                setInterval(refreshTrades, 10000);
+                refreshTrades();
 
 
                 async function refreshRejections() {
