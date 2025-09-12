@@ -351,8 +351,6 @@ class PortfolioManager:
     
     async def update_position_prices(self):
         """Update current prices for all positions"""
-async def update_position_prices(self):
-    """Update current prices for all positions"""
         try:
             # iterate over a stable view
             items = list(self.positions.items())
@@ -369,34 +367,6 @@ async def update_position_prices(self):
             logger.error(f"❌ Failed to update position prices: {e}")
             return False
 
-
-        try:
-            # iterate over a *stable* list, not the live dict
-            items = list(self.positions.items()) if hasattr(self, 'positions') else []
-            for pos_id, pos in items:
-                sym = pos['symbol']
-                price = await self.exchange_manager.get_current_price(sym)
-                if price is None:
-                    # keep going; don't crash price loop
-                    self.logger.debug(f"Price not available yet for {sym}; keeping last price")
-                    continue
-
-                # update cached current_price + PnL
-                pos['current_price'] = float(price)
-                entry = float(pos['entry_price'])
-                size  = float(pos['size'])
-                if pos['side'] == 'long':
-                    pnl = (price - entry) * size
-                else:
-                    pnl = (entry - price) * size
-
-                pos['pnl'] = pnl
-                pos['pnl_percentage'] = (pnl / max(1e-12, entry * size)) * 100.0
-
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to update position prices: {e}")
-            return False
 
     async def calculate_portfolio_metrics(self):
         """Calculate current portfolio metrics"""
