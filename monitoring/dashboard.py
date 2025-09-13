@@ -626,43 +626,6 @@ class DashboardManager:
                 }
 
 
-                // 1) filter to timeframe
-                let filtered = rawPoints.filter(p => (tf === 'all') || (now - p.ts <= windowMs));
-
-                // 2) bucketize (keep last in each bucket)
-                let out;
-                if (bucket > 0 && filtered.length > 1) {
-                    const map = new Map();
-                    for (const p of filtered) map.set(Math.floor(p.ts / bucket), p);
-                    out = Array.from(map.values()).sort((a,b) => a.ts - b.ts);
-                } else {
-                    out = filtered.slice();
-                }
-
-                // 3) ensure we always have ≥ 2 points for a visible line
-                if (out.length === 1) {
-                    out = [ { ts: out[0].ts - 5000, val: out[0].val }, out[0] ];
-                } else if (out.length === 0 && rawPoints.length) {
-                    const last = rawPoints[rawPoints.length - 1];
-                    out = [ { ts: last.ts - 5000, val: last.val }, last ];
-                }
-
-                // 4) apply to chart
-                const labels = out.map(p => new Date(p.ts).toLocaleTimeString());
-                const data = out.map(p => p.val);
-                portfolioChart.data.labels = labels;
-                portfolioChart.data.datasets[0].data = data;
-
-                // 5) suggest a sensible y-range around values if we have data
-                if (data.length) {
-                    const min = Math.min(...data), max = Math.max(...data);
-                    const pad = Math.max(1, (max - min) * 0.002); // ~0.2%
-                    portfolioChart.options.scales.y.suggestedMin = min - pad;
-                    portfolioChart.options.scales.y.suggestedMax = max + pad;
-                }
-
-                portfolioChart.update();
-                }
 
 
                 // apply on timeframe change
