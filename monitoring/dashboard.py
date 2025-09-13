@@ -221,10 +221,28 @@ class DashboardManager:
             return {}
 
     
-    # AFTER (minimal change, safer)
+    # NORMALIZE KEYS FOR FRONTEND: add "total" alias
     async def get_trades_data(self, limit: int = 50) -> dict:
-        trades = self.db.get_recent_trades(limit=limit)
-        return {"trades": trades}
+        rows = self.db.get_recent_trades(limit=limit)
+
+        normalized = []
+        for t in rows:
+            # DB gives "total_value"; frontend expects "total"
+            total = t.get("total_value")
+            if total is None:
+                # safety fallback if older rows lack total_value
+                sz = t.get("size") or 0
+                px = t.get("price") or 0
+                fee = t.get("fee") or 0
+                total = sz * px + fee
+
+            normalized.append({
+                **t,
+                "total": float(total),   # keep both: total (for UI) and total_value (for compatibility)
+            })
+
+        return {"trades": normalized}
+
 
         
         async def get_signals_data(self, limit: int = 50) -> List[Dict[str, Any]]:
