@@ -237,6 +237,7 @@ class DashboardManager:
                     size,
                     entry_price as price,
                     pnl,
+                    pnl_percentage,
                     created_at as timestamp,
                     strategy,
                     closed_at,
@@ -260,11 +261,12 @@ class DashboardManager:
                     "size": float(row[3]),
                     "price": float(row[4]),
                     "pnl": float(row[5]) if row[5] else 0.0,
-                    "timestamp": row[6].isoformat() if row[6] else None,
-                    "strategy": row[7] or "unknown",
-                    "closed_at": row[8].isoformat() if row[8] else None,
-                    "total_value": float(row[9]) if row[9] else 0.0,
-                    "total": float(row[9]) if row[9] else 0.0  # Frontend expects "total"
+                    "pnl_percentage": float(row[6]) if row[6] else 0.0,
+                    "timestamp": row[7].isoformat() if row[7] else None,
+                    "strategy": row[8] or "unknown",
+                    "closed_at": row[9].isoformat() if row[9] else None,
+                    "total_value": float(row[10]) if row[10] else 0.0,
+                    "total": float(row[10]) if row[10] else 0.0  # Frontend expects "total"
                 }
                 normalized.append(trade_data)
             
@@ -495,6 +497,8 @@ class DashboardManager:
                                 <th>Size</th>
                                 <th>Price</th>
                                 <th>Total</th>
+                                <th>PnL</th>
+                                <th>PnL %</th>
                                 <th>Strategy</th>
                             </tr>
                         </thead>
@@ -791,13 +795,29 @@ class DashboardManager:
                     const res = await fetch('/api/trades');
                     const payload = await res.json();
                     const trades = (payload && (payload.trades || payload)) || [];
+                    
+                    // Sort trades by closed_at (newest first)
+                    trades.sort((a, b) => {
+                      const dateA = new Date(a.closed_at || a.timestamp || 0);
+                      const dateB = new Date(b.closed_at || b.timestamp || 0);
+                      return dateB - dateA; // Newest first
+                    });
+                    
                     const tbody = document.getElementById('tradesBody');
                     tbody.innerHTML = trades.map(t => {
-                      const ts = new Date(t.timestamp || t.time || Date.now()).toLocaleString();
+                      // Use closed_at for display, fallback to timestamp
+                      const ts = new Date(t.closed_at || t.timestamp || t.time || Date.now()).toLocaleString();
                       const side = (t.side || '').toUpperCase();
                       const size = Number(t.size || t.amount || 0);
                       const price = Number(t.price || 0);
                       const total = size * price;
+                      const pnl = Number(t.pnl || 0);
+                      const pnlPct = Number(t.pnl_percentage || 0);
+                      
+                      // Color coding for PnL
+                      const pnlClass = pnl >= 0 ? 'positive' : 'negative';
+                      const pnlSign = pnl >= 0 ? '+' : '';
+                      
                       return `
                         <tr>
                           <td>${ts}</td>
@@ -806,6 +826,8 @@ class DashboardManager:
                           <td>${size.toFixed(6)}</td>
                           <td>${price.toFixed(4)}</td>
                           <td>${total.toFixed(2)}</td>
+                          <td class="${pnlClass}">${pnlSign}${pnl.toFixed(2)}</td>
+                          <td class="${pnlClass}">${pnlSign}${pnlPct.toFixed(2)}%</td>
                           <td>${t.strategy || ''}</td>
                         </tr>`;
                     }).join('');
