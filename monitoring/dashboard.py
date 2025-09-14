@@ -223,25 +223,70 @@ class DashboardManager:
     
     # NORMALIZE KEYS FOR FRONTEND: add "total" alias
     async def get_trades_data(self, limit: int = 50) -> dict:
-        rows = self.db.get_recent_trades(limit=limit)
-
-        normalized = []
-        for t in rows:
-            # DB gives "total_value"; frontend expects "total"
-            total = t.get("total_value")
-            if total is None:
-                # safety fallback if older rows lack total_value
-                sz = t.get("size") or 0
-                px = t.get("price") or 0
-                fee = t.get("fee") or 0
-                total = sz * px + fee
-
-            normalized.append({
-                **t,
-                "total": float(total),   # keep both: total (for UI) and total_value (for compatibility)
-            })
-
-        return {"trades": normalized}
+        # Since trades table is empty, get closed positions instead
+        try:
+            session = self.db.get_session()
+            from sqlalchemy import text
+            
+            # Get recent closed positions as "trades"
+            result = session.execute(text("""
+                SELECT 
+                    id,
+                    symbol,
+                    side,
+                    size,
+                    entry_price as price,
+                    pnl,
+                    created_at as timestamp,
+                    strategy,
+                    closed_at,
+                    (size * entry_price) as total_value
+                FROM positions 
+                WHERE is_open = false 
+                ORDER BY closed_at DESC 
+                LIMIT :limit
+            """), {"limit": limit})
+            
+            rows = result.fetchall()
+            session.close()
+            
+            normalized = []
+            for row in rows:
+                # Convert row to dict format expected by frontend
+                trade_data = {
+                    "id": row[0],
+                    "symbol": row[1],
+                    "side": row[2],
+                    "size": float(row[3]),
+                    "price": float(row[4]),
+                    "pnl": float(row[5]) if row[5] else 0.0,
+                    "timestamp": row[6].isoformat() if row[6] else None,
+                    "strategy": row[7] or "unknown",
+                    "closed_at": row[8].isoformat() if row[8] else None,
+                    "total_value": float(row[9]) if row[9] else 0.0,
+                    "total": float(row[9]) if row[9] else 0.0  # Frontend expects "total"
+                }
+                normalized.append(trade_data)
+            
+            return {"trades": normalized}
+            
+        except Exception as e:
+            logger.error(f"Failed to get trades data: {e}")
+            # Fallback to original method
+            rows = self.db.get_recent_trades(limit=limit)
+            normalized = []
+            for t in rows:
+                total = t.get("total_value")
+                if total is None:
+                    sz = t.get("size") or 0
+                    px = t.get("price") or 0
+                    fee = t.get("fee") or 0
+                    total = sz * px + fee
+                normalized.append({
+                    **t,
+                    "total": float(total),
+                })
+            return {"trades": normalized}
 
 
         
