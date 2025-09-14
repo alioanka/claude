@@ -13,13 +13,17 @@ import structlog
 
 from config.config import config
 
+# Add these module-level singletons near the top of the file (once):
+_ROOT_LOGGER_NAME = "trading_bot"
+_ROOT_INITIALIZED = False
+
 def setup_logger(name: str, level: Optional[str] = None) -> logging.Logger:
-    """Setup logger with structured logging"""
-    
-    # Create logs directory if it doesn't exist
+    """Set up a single rotating handler on the root, and let children propagate."""
+    global _ROOT_INITIALIZED
+
     os.makedirs('logs', exist_ok=True)
-    
-    # Configure structlog
+
+    # structlog stays as-is
     structlog.configure(
         processors=[
             structlog.stdlib.filter_by_level,
@@ -37,17 +41,63 @@ def setup_logger(name: str, level: Optional[str] = None) -> logging.Logger:
         wrapper_class=structlog.stdlib.BoundLogger,
         cache_logger_on_first_use=True,
     )
-    
-    # Create logger
-    logger = logging.getLogger(name)
-    
-    # Set log level
-    log_level = level or os.getenv('LOG_LEVEL', 'INFO')
-    logger.setLevel(getattr(logging, log_level.upper()))
-    
-    # Don't add handlers if they already exist
-    if logger.handlers:
-        return logger
+
+    # 1) Initialize the ONE root only once
+    root = logging.getLogger(_ROOT_LOGGER_NAME)
+    if not _ROOT_INITIALIZED:
+        log_level = (level or os.getenv('LOG_LEVEL', 'INFO')).upper()
+        root.setLevel(getattr(logging, log_level))
+
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.INFO)
+
+        # IMPORTANT: delay=True and encoding to reduce contention and mojibake
+        file_handler = logging.handlers.RotatingFileHandler(
+            'logs/trading_bot.log', maxBytes=10*1024*1024, backupCount=5,
+            delay=True, encoding='utf-8'
+        )
+        file_handler.setLevel(logging.DEBUG)
+
+        error_handler = logging.handlers.RotatingFileHandler(
+            'logs/error.log', maxBytes=10*1024*1024, backupCount=5,
+            delay=True, encoding='utf-8'
+        )
+        error_handler.setLevel(logging.ERROR)
+
+        # Trades go to a separate file; filter so only trade/portfolio logs hit it
+        trade_handler = logging.handlers.RotatingFileHandler(
+            'logs/trades.log', maxBytes=10*1024*1024, backupCount=10,
+            delay=True, encoding='utf-8'
+        )
+        trade_handler.setLevel(logging.INFO)
+        trade_handler.addFilter(lambda r: ('trade' in r.name.lower()) or ('portfolio' in r.name.lower()))
+
+        detailed_formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s'
+        )
+        console_formatter = ColoredFormatter('%(asctime)s | %(levelname_colored)s | %(name_colored)s | %(message)s')
+        json_formatter = logging.Formatter(
+            '{"timestamp": "%(asctime)s", "level": "%(levelname)s", "logger": "%(name)s", "message": "%(message)s"}'
+        )
+
+        console_handler.setFormatter(console_formatter)
+        file_handler.setFormatter(detailed_formatter)
+        error_handler.setFormatter(detailed_formatter)
+        trade_handler.setFormatter(json_formatter)
+
+        root.addHandler(console_handler)
+        root.addHandler(file_handler)
+        root.addHandler(error_handler)
+        root.addHandler(trade_handler)
+
+        _ROOT_INITIALIZED = True
+
+    # 2) Return a child logger that just propagates to the root handlers
+    child = logging.getLogger(f"{_ROOT_LOGGER_NAME}.{name}")
+    child.propagate = True
+    child.handlers = []  # ensure no duplicate handlers on children
+    return child
+
     
     # Console handler with colored output
     console_handler = logging.StreamHandler(sys.stdout)
