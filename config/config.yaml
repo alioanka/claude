@@ -4,8 +4,8 @@
 database:
   host: "postgres"  # Docker service name
   port: 5432
-  username: "trading_user"
-  password: "trading_pass"
+  username: "trader"
+  password: "secure_password"
   database: "trading_bot"
   
 # Redis Configuration
@@ -47,17 +47,17 @@ exchanges:
     sandbox: true
     
 # Data Sources
-data:
-  symbols: 
-    - "BTC/USDT"
-    - "ETH/USDT" 
-    - "SOL/USDT"
-    - "ADA/USDT"
-    - "MATIC/USDT"
-  timeframe: "1h"
-  lookback_days: 365
-  cache_enabled: true
-  cache_dir: "data/cache"
+# data:
+#   symbols: 
+#     - "BTC/USDT"
+#     - "ETH/USDT" 
+#     - "SOL/USDT"
+#     - "ADA/USDT"
+#     - "MATIC/USDT"
+#   timeframe: "1h"
+#   lookback_days: 365
+#   cache_enabled: true
+#   cache_dir: "data/cache"
 
 # Machine Learning Configuration
 ml:

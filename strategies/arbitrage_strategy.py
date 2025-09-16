@@ -21,13 +21,13 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ArbitrageConfig:
     """Configuration for arbitrage strategy"""
-    min_spread_threshold: float = 0.005  # 0.5% minimum spread
+    min_spread_threshold: float = 0.002  # 0.2% minimum spread
     max_spread_threshold: float = 0.05   # 5% maximum spread (might be error)
-    correlation_threshold: float = 0.8   # Minimum correlation for pair trading
+    correlation_threshold: float = 0.7   # Minimum correlation for pair trading
     lookback_period: int = 100           # Periods for correlation calculation
-    z_score_threshold: float = 2.0       # Z-score threshold for mean reversion
+    z_score_threshold: float = 0.8       # Z-score threshold for mean reversion
     max_position_hold_time: int = 24     # Maximum hours to hold position
-    transaction_cost: float = 0.002      # Total transaction costs (0.2%)
+    transaction_cost: float = 0.001      # Total transaction costs (0.1%)
 
 class ArbitrageStrategy(BaseStrategy):
     """
@@ -39,7 +39,8 @@ class ArbitrageStrategy(BaseStrategy):
     
     def __init__(self, config: Dict[str, Any] = None):
         super().__init__("arbitrage_strategy", config)
-        self.arb_config = ArbitrageConfig(**config.get('arbitrage_params', {}))
+        self.config = config or {}
+        self.arb_config = ArbitrageConfig(**self.config.get('arbitrage_params', {}))
         self.indicators = TechnicalIndicators()
         
         # Exchange connections for cross-exchange arbitrage
@@ -57,9 +58,8 @@ class ArbitrageStrategy(BaseStrategy):
     def _initialize_exchanges(self):
         """Initialize exchange connections"""
         try:
-         
             exchange_configs = self.config.get('exchanges', {})
-            # Fallback to public price clients if strategy config doesn’t provide exchanges
+            # Fallback to public price clients if strategy config doesn't provide exchanges
             if not exchange_configs:
                 exchange_configs = {
                     'binance': {'enabled': True, 'sandbox': True},
@@ -69,16 +69,19 @@ class ArbitrageStrategy(BaseStrategy):
             
             for exchange_name, config in exchange_configs.items():
                 if config.get('enabled', False):
-                    exchange_class = getattr(ccxt, exchange_name)
-                    self.exchanges[exchange_name] = exchange_class({
-                        'enableRateLimit': True,
-                        # API keys optional for public price data:
-                        'apiKey': config.get('api_key', ''),
-                        'secret': config.get('secret', ''),
-                        'options': {'defaultType': 'spot'},
-                    })
-                    logger.info(f"Initialized exchange: {exchange_name}")
-
+                    try:
+                        exchange_class = getattr(ccxt, exchange_name)
+                        self.exchanges[exchange_name] = exchange_class({
+                            'enableRateLimit': True,
+                            # API keys optional for public price data:
+                            'apiKey': config.get('api_key', ''),
+                            'secret': config.get('secret', ''),
+                            'options': {'defaultType': 'spot'},
+                        })
+                        logger.info(f"Initialized exchange: {exchange_name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to initialize {exchange_name}: {e}")
+                        continue
                     
         except Exception as e:
             logger.error(f"Exchange initialization failed: {e}")
@@ -103,25 +106,33 @@ class ArbitrageStrategy(BaseStrategy):
     async def generate_signal(self, symbol: str, data: pd.DataFrame, **kwargs) -> Optional[Dict[str, Any]]:
         """Generate arbitrage signals"""
         try:
-            data = self._ensure_dataframe(data)
+            # data is already a DataFrame, no need to call _ensure_dataframe
+            if data is None or data.empty or len(data) < 50:
+                return None
 
             signals = []
             
-            # Cross-exchange arbitrage
-            if len(self.exchanges) > 1:
-                cross_exchange_signal = await self._check_cross_exchange_arbitrage(symbol)
-                if cross_exchange_signal:
-                    signals.append(cross_exchange_signal)
-            
-            # Statistical arbitrage (pairs trading)
+            # Statistical arbitrage (pairs trading) - Primary signal source
             pairs_signal = await self._check_statistical_arbitrage(symbol, data)
             if pairs_signal:
                 signals.append(pairs_signal)
             
-            # Triangular arbitrage
-            triangular_signal = await self._check_triangular_arbitrage(symbol)
-            if triangular_signal:
-                signals.append(triangular_signal)
+            # Cross-exchange arbitrage - Secondary (requires valid API keys)
+            if len(self.exchanges) > 1:
+                try:
+                    cross_exchange_signal = await self._check_cross_exchange_arbitrage(symbol)
+                    if cross_exchange_signal:
+                        signals.append(cross_exchange_signal)
+                except Exception as e:
+                    logger.debug(f"Cross-exchange arbitrage failed (API issue): {e}")
+            
+            # Triangular arbitrage - Secondary (requires valid API keys)
+            try:
+                triangular_signal = await self._check_triangular_arbitrage(symbol)
+                if triangular_signal:
+                    signals.append(triangular_signal)
+            except Exception as e:
+                logger.debug(f"Triangular arbitrage failed (API issue): {e}")
             
             # Return highest confidence signal
             if signals:
@@ -282,13 +293,6 @@ class ArbitrageStrategy(BaseStrategy):
                         }
 
 
-            # ... after you have the two effective prices for this symbol:
-            if buy_price and sell_price:
-                # symmetric % spread around the mid-price
-                mid = (buy_price + sell_price) / 2.0
-                if mid > 0:
-                    spread = abs(sell_price - buy_price) / mid
-                    self._last_spread = max(self._last_spread or 0.0, spread)
 
             
             if best_opportunity:
@@ -832,3 +836,25 @@ class ArbitrageStrategy(BaseStrategy):
         except Exception as e:
             logger.error(f"Position close check failed: {e}")
             return False
+    
+    def _pick_correlated_pair(self, symbol: str) -> Optional[str]:
+        """Pick a correlated pair for statistical arbitrage"""
+        try:
+            common_pairs = {
+                'BTCUSDT': ['ETHUSDT', 'BNBUSDT'],
+                'ETHUSDT': ['BTCUSDT', 'ADAUSDT'],
+                'BNBUSDT': ['BTCUSDT', 'ETHUSDT']
+            }
+            pairs = common_pairs.get(symbol, [])
+            return pairs[0] if pairs else None
+        except Exception:
+            return None
+    
+    def _get_df(self, symbol: str) -> Optional[pd.DataFrame]:
+        """Get DataFrame for a symbol (placeholder implementation)"""
+        try:
+            # This would typically fetch data from a data source
+            # For now, return None to indicate no data available
+            return None
+        except Exception:
+            return None

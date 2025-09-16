@@ -129,15 +129,29 @@ class StrategyManager:
                 self.strategies['mean_reversion'] = MeanReversionStrategy()
                 logger.info("✅ Mean Reversion Strategy loaded")
 
-            # Initialize Arbitrage Strategy (if allocated)
+            # Initialize Enhanced Arbitrage Strategy (if allocated)
             if 'arbitrage_strategy' in self.strategy_allocation and (
                 hasattr(config, 'strategies') and config.strategies.get('arbitrage_strategy', {}).get('enabled', True)
             ):
                 arb_params = {}
                 if hasattr(config, 'strategies') and 'arbitrage_strategy' in getattr(config, 'strategies', {}):
                     arb_params = config.strategies['arbitrage_strategy'].get('parameters', {})
+                
+                # Add exchange configurations
+                exchanges_config = {}
+                for exchange_name in ['binance', 'kucoin', 'bybit']:
+                    exchange_config = config.get_exchange_config(exchange_name)
+                    if exchange_config and exchange_config.get('enabled', False):
+                        exchanges_config[exchange_name] = {
+                            'enabled': exchange_config.get('enabled', False),
+                            'api_key': exchange_config.get('api_key', ''),
+                            'secret': exchange_config.get('api_secret', ''),
+                            'sandbox': exchange_config.get('sandbox', True)
+                        }
+                
+                arb_params['exchanges'] = exchanges_config
                 self.strategies['arbitrage_strategy'] = ArbitrageStrategy(arb_params)
-                logger.info("✅ Arbitrage Strategy loaded")
+                logger.info("✅ Enhanced Arbitrage Strategy loaded with exchange configs")
 
 
             # Initialize ML Strategy (config-driven)
