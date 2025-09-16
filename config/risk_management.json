@@ -1,9 +1,9 @@
 {
     "position_sizing": {
-      "max_position_size_percent": 10,
-      "base_position_size_percent": 2,
-      "max_total_exposure_percent": 50,
-      "min_position_size_usd": 10
+      "max_position_size_percent": 1,
+      "base_position_size_percent": 1,
+      "max_total_exposure_percent": 25,
+      "min_position_size_usd": 100
     },
     "stop_loss": {
       "default_stop_loss_percent": 5,
@@ -35,8 +35,8 @@
       "correlation_threshold": 0.7
     },
     "market_conditions": {
-      "bull_market_max_positions": 15,
-      "bear_market_max_positions": 6,
-      "sideways_market_max_positions": 8
+      "bull_market_max_positions": 25,
+      "bear_market_max_positions": 15,
+      "sideways_market_max_positions": 20
     }
   }

@@ -18,7 +18,8 @@ redis:
 # Trading Configuration
 trading:
   initial_capital: 100000
-  max_position_size: 0.1  # 10% of portfolio per position
+  max_positions: 25        # Maximum concurrent positions
+  max_position_size: 0.01  # 1% of portfolio per position
   stop_loss: 0.02         # 2% stop loss
   take_profit: 0.04       # 4% take profit
   max_drawdown: 0.15      # 15% maximum drawdown

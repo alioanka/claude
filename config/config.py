@@ -28,8 +28,8 @@ class TradingConfig:
     """Trading configuration settings"""
     mode: str = os.getenv("TRADING_MODE", "paper")  # paper or live
     initial_capital: float = float(os.getenv("INITIAL_CAPITAL", "100000"))
-    max_positions: int = int(os.getenv("MAX_POSITIONS", "5"))
-    risk_per_trade: float = float(os.getenv("RISK_PER_TRADE", "0.02"))
+    max_positions: int = int(os.getenv("MAX_POSITIONS", "25"))
+    risk_per_trade: float = float(os.getenv("RISK_PER_TRADE", "0.01"))
     max_drawdown: float = float(os.getenv("MAX_DRAWDOWN", "0.15"))
     stop_loss_percent: float = float(os.getenv("STOP_LOSS_PERCENT", "0.03"))
     take_profit_percent: float = float(os.getenv("TAKE_PROFIT_PERCENT", "0.06"))
@@ -93,6 +93,22 @@ class Config:
         
         # Override with YAML config if available
         if yaml_config:
+            # Update trading config from YAML
+            if 'trading' in yaml_config:
+                trading_config = yaml_config['trading']
+                if 'initial_capital' in trading_config:
+                    self.trading.initial_capital = trading_config['initial_capital']
+                if 'max_positions' in trading_config:
+                    self.trading.max_positions = trading_config['max_positions']
+                if 'max_position_size' in trading_config:
+                    self.trading.risk_per_trade = trading_config['max_position_size']
+                if 'stop_loss' in trading_config:
+                    self.trading.stop_loss_percent = trading_config['stop_loss']
+                if 'take_profit' in trading_config:
+                    self.trading.take_profit_percent = trading_config['take_profit']
+                if 'max_drawdown' in trading_config:
+                    self.trading.max_drawdown = trading_config['max_drawdown']
+            
             # Update strategies config from YAML
             if 'strategies' in yaml_config:
                 self.strategies.update(yaml_config['strategies'])

@@ -111,8 +111,8 @@ class PortfolioManager:
         
         # Risk tracking
         self.position_limits = {
-            'max_position_size': config.trading.initial_capital * 0.10,  # 10% max per position
-            'max_total_exposure': config.trading.initial_capital * 0.80,  # 80% max exposure
+            'max_position_size': config.trading.initial_capital * 0.01,  # 1% max per position
+            'max_total_exposure': config.trading.initial_capital * 0.25,  # 25% max exposure
             'max_correlation': 0.7,  # 70% max correlation between positions
         }
     
@@ -350,7 +350,7 @@ class PortfolioManager:
             return None
     
     async def update_position_prices(self):
-        """Update current prices for all positions"""
+        """Update current prices for all positions and handle trailing stop loss"""
         try:
             # iterate over a stable view
             items = list(self.positions.items())
@@ -359,6 +359,9 @@ class PortfolioManager:
                 if current_price:
                     position.current_price = float(current_price)
                     position.update_current_value()
+                    
+                    # Handle trailing stop loss logic
+                    await self._check_trailing_stop_loss(symbol, position)
 
             # Update portfolio metrics once at the end
             await self.calculate_portfolio_metrics()
@@ -367,6 +370,42 @@ class PortfolioManager:
             logger.error(f"❌ Failed to update position prices: {e}")
             return False
 
+    async def _check_trailing_stop_loss(self, symbol: str, position: PortfolioPosition):
+        """Check and update trailing stop loss for a position"""
+        try:
+            # Calculate current PnL percentage
+            if position.side == "long":
+                pnl_pct = (position.current_price - position.entry_price) / position.entry_price
+            else:  # short
+                pnl_pct = (position.entry_price - position.current_price) / position.entry_price
+            
+            # Check if we should activate trailing stop loss (3% profit)
+            trailing_activation_threshold = 0.03  # 3%
+            
+            if pnl_pct >= trailing_activation_threshold:
+                # Check if we need to update the stop loss to breakeven
+                if not hasattr(position, 'trailing_stop_activated') or not position.trailing_stop_activated:
+                    # Activate trailing stop loss
+                    position.trailing_stop_activated = True
+                    position.original_stop_loss = getattr(position, 'stop_loss', None)
+                    position.stop_loss = position.entry_price  # Move to breakeven
+                    
+                    logger.info(f"🎯 Trailing stop activated for {symbol}: "
+                              f"PnL {pnl_pct:.2%}, SL moved to breakeven ${position.entry_price:.4f}")
+                
+                # Check if we should close the position (stop loss hit)
+                if position.side == "long" and position.current_price <= position.stop_loss:
+                    logger.info(f"🛑 Trailing stop loss hit for {symbol} (LONG): "
+                              f"Price ${position.current_price:.4f} <= SL ${position.stop_loss:.4f}")
+                    await self.remove_position(symbol, position.current_price)
+                    
+                elif position.side == "short" and position.current_price >= position.stop_loss:
+                    logger.info(f"🛑 Trailing stop loss hit for {symbol} (SHORT): "
+                              f"Price ${position.current_price:.4f} >= SL ${position.stop_loss:.4f}")
+                    await self.remove_position(symbol, position.current_price)
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to check trailing stop loss for {symbol}: {e}")
 
     async def calculate_portfolio_metrics(self):
         """Calculate current portfolio metrics"""

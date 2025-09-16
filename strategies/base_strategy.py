@@ -81,7 +81,7 @@ class BaseStrategy(ABC):
         # Risk parameters
         self.stop_loss_pct = float(getattr(config.trading, 'stop_loss_percent', 0.03))  # 3% stop loss
         self.take_profit_pct = float(getattr(config.trading, 'take_profit_percent', 0.06))  # 6% take profit
-        self.max_risk_per_trade = 0.02  # 2% portfolio risk per trade
+        self.max_risk_per_trade = 0.01  # 1% portfolio risk per trade
         
         logger.info(f"🎯 Strategy initialized: {self.name}")
     

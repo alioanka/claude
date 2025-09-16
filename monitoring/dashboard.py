@@ -28,6 +28,12 @@ class DashboardManager:
         self.bot = bot
         self.app = FastAPI(title="Crypto Trading Bot Dashboard")
         self.active_connections: List[WebSocket] = []
+        
+        # Performance optimization: Cache for analytics data
+        self.analytics_cache = {}
+        self.cache_timeout = 30  # seconds
+        self.last_cache_update = 0
+        
         self.setup_routes()
         
     def setup_routes(self):
@@ -84,6 +90,26 @@ class DashboardManager:
         async def get_rejections():
             """Get recent signal/order rejections"""
             return await self.get_rejections_data()
+        
+        @self.app.get("/api/pnl-by-pairs")
+        async def get_pnl_by_pairs():
+            """Get PnL statistics grouped by trading pairs"""
+            return await self.get_pnl_by_pairs_data()
+        
+        @self.app.get("/api/pnl-by-strategies")
+        async def get_pnl_by_strategies():
+            """Get PnL statistics grouped by strategies"""
+            return await self.get_pnl_by_strategies_data()
+        
+        @self.app.get("/api/trade-statistics")
+        async def get_trade_statistics():
+            """Get comprehensive trade statistics"""
+            return await self.get_trade_statistics_data()
+        
+        @self.app.get("/api/performance-charts")
+        async def get_performance_charts():
+            """Get performance chart data"""
+            return await self.get_performance_charts_data()
 
         @self.app.post("/api/positions/{symbol}/close")
         async def api_close_position(symbol: str):
@@ -403,6 +429,262 @@ class DashboardManager:
             logger.error(f"Failed to calculate daily PnL: {e}")
             return 0.0
     
+    def _is_cache_valid(self, cache_key: str) -> bool:
+        """Check if cache is still valid"""
+        import time
+        if cache_key not in self.analytics_cache:
+            return False
+        return (time.time() - self.analytics_cache[cache_key]['timestamp']) < self.cache_timeout
+    
+    def _get_cached_data(self, cache_key: str) -> Any:
+        """Get cached data if valid"""
+        if self._is_cache_valid(cache_key):
+            return self.analytics_cache[cache_key]['data']
+        return None
+    
+    def _set_cached_data(self, cache_key: str, data: Any) -> None:
+        """Set cached data with timestamp"""
+        import time
+        self.analytics_cache[cache_key] = {
+            'data': data,
+            'timestamp': time.time()
+        }
+
+    async def get_pnl_by_pairs_data(self) -> Dict[str, Any]:
+        """Get PnL statistics grouped by trading pairs"""
+        cache_key = 'pnl_by_pairs'
+        cached_data = self._get_cached_data(cache_key)
+        if cached_data is not None:
+            return cached_data
+            
+        try:
+            session = self.db.get_session()
+            from sqlalchemy import text
+            
+            # Get PnL data grouped by symbol
+            result = session.execute(text("""
+                SELECT 
+                    symbol,
+                    COUNT(*) as trade_count,
+                    SUM(pnl) as total_pnl,
+                    AVG(pnl) as avg_pnl,
+                    SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as win_count,
+                    SUM(CASE WHEN pnl <= 0 THEN 1 ELSE 0 END) as loss_count,
+                    MAX(pnl) as max_pnl,
+                    MIN(pnl) as min_pnl
+                FROM positions 
+                WHERE is_open = false AND pnl IS NOT NULL
+                GROUP BY symbol
+                ORDER BY total_pnl DESC
+            """))
+            
+            rows = result.fetchall()
+            session.close()
+            
+            data = []
+            for row in rows:
+                win_rate = (row[4] / row[1] * 100) if row[1] > 0 else 0
+                data.append({
+                    "symbol": row[0],
+                    "trade_count": row[1],
+                    "total_pnl": float(row[2]) if row[2] else 0.0,
+                    "avg_pnl": float(row[3]) if row[3] else 0.0,
+                    "win_count": row[4],
+                    "loss_count": row[5],
+                    "win_rate": round(win_rate, 2),
+                    "max_pnl": float(row[6]) if row[6] else 0.0,
+                    "min_pnl": float(row[7]) if row[7] else 0.0
+                })
+            
+            result_data = {"pairs": data}
+            self._set_cached_data(cache_key, result_data)
+            return result_data
+            
+        except Exception as e:
+            logger.error(f"Failed to get PnL by pairs data: {e}")
+            return {"pairs": []}
+    
+    async def get_pnl_by_strategies_data(self) -> Dict[str, Any]:
+        """Get PnL statistics grouped by strategies"""
+        cache_key = 'pnl_by_strategies'
+        cached_data = self._get_cached_data(cache_key)
+        if cached_data is not None:
+            return cached_data
+            
+        try:
+            session = self.db.get_session()
+            from sqlalchemy import text
+            
+            # Get PnL data grouped by strategy
+            result = session.execute(text("""
+                SELECT 
+                    strategy,
+                    COUNT(*) as trade_count,
+                    SUM(pnl) as total_pnl,
+                    AVG(pnl) as avg_pnl,
+                    SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as win_count,
+                    SUM(CASE WHEN pnl <= 0 THEN 1 ELSE 0 END) as loss_count,
+                    MAX(pnl) as max_pnl,
+                    MIN(pnl) as min_pnl
+                FROM positions 
+                WHERE is_open = false AND pnl IS NOT NULL AND strategy IS NOT NULL
+                GROUP BY strategy
+                ORDER BY total_pnl DESC
+            """))
+            
+            rows = result.fetchall()
+            session.close()
+            
+            data = []
+            for row in rows:
+                win_rate = (row[4] / row[1] * 100) if row[1] > 0 else 0
+                data.append({
+                    "strategy": row[0],
+                    "trade_count": row[1],
+                    "total_pnl": float(row[2]) if row[2] else 0.0,
+                    "avg_pnl": float(row[3]) if row[3] else 0.0,
+                    "win_count": row[4],
+                    "loss_count": row[5],
+                    "win_rate": round(win_rate, 2),
+                    "max_pnl": float(row[6]) if row[6] else 0.0,
+                    "min_pnl": float(row[7]) if row[7] else 0.0
+                })
+            
+            result_data = {"strategies": data}
+            self._set_cached_data(cache_key, result_data)
+            return result_data
+            
+        except Exception as e:
+            logger.error(f"Failed to get PnL by strategies data: {e}")
+            return {"strategies": []}
+    
+    async def get_trade_statistics_data(self) -> Dict[str, Any]:
+        """Get comprehensive trade statistics"""
+        cache_key = 'trade_statistics'
+        cached_data = self._get_cached_data(cache_key)
+        if cached_data is not None:
+            return cached_data
+            
+        try:
+            session = self.db.get_session()
+            from sqlalchemy import text
+            
+            # Get overall statistics
+            result = session.execute(text("""
+                SELECT 
+                    COUNT(*) as total_trades,
+                    SUM(pnl) as total_pnl,
+                    AVG(pnl) as avg_pnl,
+                    SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as win_count,
+                    SUM(CASE WHEN pnl <= 0 THEN 1 ELSE 0 END) as loss_count,
+                    MAX(pnl) as max_pnl,
+                    MIN(pnl) as min_pnl,
+                    STDDEV(pnl) as pnl_stddev
+                FROM positions 
+                WHERE is_open = false AND pnl IS NOT NULL
+            """))
+            
+            row = result.fetchone()
+            session.close()
+            
+            if row and row[0] > 0:
+                win_rate = (row[3] / row[0] * 100) if row[0] > 0 else 0
+                return {
+                    "total_trades": row[0],
+                    "total_pnl": float(row[1]) if row[1] else 0.0,
+                    "avg_pnl": float(row[2]) if row[2] else 0.0,
+                    "win_count": row[3],
+                    "loss_count": row[4],
+                    "win_rate": round(win_rate, 2),
+                    "max_pnl": float(row[5]) if row[5] else 0.0,
+                    "min_pnl": float(row[6]) if row[6] else 0.0,
+                    "pnl_stddev": float(row[7]) if row[7] else 0.0,
+                    "profit_factor": abs(row[1] / abs(row[4])) if row[4] != 0 else 0
+                }
+            else:
+                result_data = {
+                    "total_trades": 0,
+                    "total_pnl": 0.0,
+                    "avg_pnl": 0.0,
+                    "win_count": 0,
+                    "loss_count": 0,
+                    "win_rate": 0.0,
+                    "max_pnl": 0.0,
+                    "min_pnl": 0.0,
+                    "pnl_stddev": 0.0,
+                    "profit_factor": 0.0
+                }
+                self._set_cached_data(cache_key, result_data)
+                return result_data
+                
+        except Exception as e:
+            logger.error(f"Failed to get trade statistics: {e}")
+            return {
+                "total_trades": 0,
+                "total_pnl": 0.0,
+                "avg_pnl": 0.0,
+                "win_count": 0,
+                "loss_count": 0,
+                "win_rate": 0.0,
+                "max_pnl": 0.0,
+                "min_pnl": 0.0,
+                "pnl_stddev": 0.0,
+                "profit_factor": 0.0
+            }
+    
+    async def get_performance_charts_data(self) -> Dict[str, Any]:
+        """Get performance chart data"""
+        cache_key = 'performance_charts'
+        cached_data = self._get_cached_data(cache_key)
+        if cached_data is not None:
+            return cached_data
+            
+        try:
+            session = self.db.get_session()
+            from sqlalchemy import text
+            
+            # Get daily PnL data for the last 30 days
+            result = session.execute(text("""
+                SELECT 
+                    DATE(closed_at) as trade_date,
+                    COUNT(*) as trade_count,
+                    SUM(pnl) as daily_pnl,
+                    SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as daily_wins
+                FROM positions 
+                WHERE is_open = false 
+                AND closed_at >= CURRENT_DATE - INTERVAL '30 days'
+                AND pnl IS NOT NULL
+                GROUP BY DATE(closed_at)
+                ORDER BY trade_date
+            """))
+            
+            rows = result.fetchall()
+            session.close()
+            
+            daily_data = []
+            cumulative_pnl = 0.0
+            
+            for row in rows:
+                cumulative_pnl += float(row[2]) if row[2] else 0.0
+                daily_data.append({
+                    "date": row[0].isoformat() if row[0] else None,
+                    "trade_count": row[1],
+                    "daily_pnl": float(row[2]) if row[2] else 0.0,
+                    "daily_wins": row[3],
+                    "cumulative_pnl": cumulative_pnl
+                })
+            
+            result_data = {
+                "daily_performance": daily_data,
+                "total_days": len(daily_data)
+            }
+            self._set_cached_data(cache_key, result_data)
+            return result_data
+            
+        except Exception as e:
+            logger.error(f"Failed to get performance charts data: {e}")
+            return {"daily_performance": [], "total_days": 0}
+    
     async def get_dashboard_html(self) -> str:
         """Generate dashboard HTML"""
         return """
@@ -520,6 +802,70 @@ class DashboardManager:
                         </thead>
                         <tbody id="rejectionsBody">
                             <!-- Rejections will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Enhanced Analytics Section -->
+                <div class="chart-container">
+                    <h3>📊 Trade Statistics</h3>
+                    <div id="tradeStats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                        <!-- Statistics will be populated by JavaScript -->
+                    </div>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                    <div class="chart-container">
+                        <h3>🥧 PnL by Trading Pairs</h3>
+                        <canvas id="pnlPairsChart" width="400" height="300"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <h3>🎯 PnL by Strategies</h3>
+                        <canvas id="pnlStrategiesChart" width="400" height="300"></canvas>
+                    </div>
+                </div>
+                
+                <div class="chart-container">
+                    <h3>📈 Daily Performance</h3>
+                    <canvas id="dailyPerformanceChart" width="800" height="400"></canvas>
+                </div>
+                
+                <div class="chart-container">
+                    <h3>📋 Pairs Performance Details</h3>
+                    <table id="pairsPerformanceTable">
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Trades</th>
+                                <th>Total PnL</th>
+                                <th>Avg PnL</th>
+                                <th>Win Rate</th>
+                                <th>Max PnL</th>
+                                <th>Min PnL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pairsPerformanceBody">
+                            <!-- Pairs performance will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="chart-container">
+                    <h3>🎯 Strategies Performance Details</h3>
+                    <table id="strategiesPerformanceTable">
+                        <thead>
+                            <tr>
+                                <th>Strategy</th>
+                                <th>Trades</th>
+                                <th>Total PnL</th>
+                                <th>Avg PnL</th>
+                                <th>Win Rate</th>
+                                <th>Max PnL</th>
+                                <th>Min PnL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="strategiesPerformanceBody">
+                            <!-- Strategies performance will be populated by JavaScript -->
                         </tbody>
                     </table>
                 </div>
@@ -869,6 +1215,274 @@ class DashboardManager:
                 setInterval(refreshRejections, 10000);
                 // also load immediately at page open
                 refreshRejections();
+
+                // Enhanced Analytics Functions
+                let pnlPairsChart, pnlStrategiesChart, dailyPerformanceChart;
+                
+                async function loadEnhancedAnalytics() {
+                    try {
+                        await Promise.all([
+                            loadTradeStatistics(),
+                            loadPnLByPairs(),
+                            loadPnLByStrategies(),
+                            loadPerformanceCharts()
+                        ]);
+                    } catch (e) {
+                        console.warn('Enhanced analytics load failed', e);
+                    }
+                }
+                
+                async function loadTradeStatistics() {
+                    try {
+                        const res = await fetch('/api/trade-statistics');
+                        const stats = await res.json();
+                        updateTradeStatistics(stats);
+                    } catch (e) {
+                        console.warn('Trade statistics load failed', e);
+                    }
+                }
+                
+                function updateTradeStatistics(stats) {
+                    const statsHtml = `
+                        <div class="metric-card">
+                            <div class="metric-value">${stats.total_trades || 0}</div>
+                            <div class="metric-label">Total Trades</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value ${(stats.total_pnl || 0) >= 0 ? 'positive' : 'negative'}">
+                                $${(stats.total_pnl || 0).toFixed(2)}
+                            </div>
+                            <div class="metric-label">Total PnL</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">${(stats.win_rate || 0).toFixed(1)}%</div>
+                            <div class="metric-label">Win Rate</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">${(stats.avg_pnl || 0).toFixed(2)}</div>
+                            <div class="metric-label">Avg PnL</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">${(stats.profit_factor || 0).toFixed(2)}</div>
+                            <div class="metric-label">Profit Factor</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value">${(stats.pnl_stddev || 0).toFixed(2)}</div>
+                            <div class="metric-label">PnL Std Dev</div>
+                        </div>
+                    `;
+                    document.getElementById('tradeStats').innerHTML = statsHtml;
+                }
+                
+                async function loadPnLByPairs() {
+                    try {
+                        const res = await fetch('/api/pnl-by-pairs');
+                        const data = await res.json();
+                        updatePnLPairsChart(data.pairs || []);
+                        updatePairsPerformanceTable(data.pairs || []);
+                    } catch (e) {
+                        console.warn('PnL by pairs load failed', e);
+                    }
+                }
+                
+                function updatePnLPairsChart(pairs) {
+                    const ctx = document.getElementById('pnlPairsChart').getContext('2d');
+                    
+                    if (pnlPairsChart) {
+                        pnlPairsChart.destroy();
+                    }
+                    
+                    const labels = pairs.slice(0, 10).map(p => p.symbol);
+                    const data = pairs.slice(0, 10).map(p => p.total_pnl);
+                    const colors = data.map(pnl => pnl >= 0 ? '#4CAF50' : '#f44336');
+                    
+                    pnlPairsChart = new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                data: data,
+                                backgroundColor: colors,
+                                borderWidth: 2,
+                                borderColor: '#333'
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: {
+                                legend: {
+                                    position: 'bottom',
+                                    labels: {
+                                        color: '#fff'
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                function updatePairsPerformanceTable(pairs) {
+                    const tbody = document.getElementById('pairsPerformanceBody');
+                    tbody.innerHTML = pairs.map(pair => `
+                        <tr>
+                            <td>${pair.symbol}</td>
+                            <td>${pair.trade_count}</td>
+                            <td class="${pair.total_pnl >= 0 ? 'positive' : 'negative'}">
+                                $${pair.total_pnl.toFixed(2)}
+                            </td>
+                            <td class="${pair.avg_pnl >= 0 ? 'positive' : 'negative'}">
+                                $${pair.avg_pnl.toFixed(2)}
+                            </td>
+                            <td>${pair.win_rate.toFixed(1)}%</td>
+                            <td class="positive">$${pair.max_pnl.toFixed(2)}</td>
+                            <td class="negative">$${pair.min_pnl.toFixed(2)}</td>
+                        </tr>
+                    `).join('');
+                }
+                
+                async function loadPnLByStrategies() {
+                    try {
+                        const res = await fetch('/api/pnl-by-strategies');
+                        const data = await res.json();
+                        updatePnLStrategiesChart(data.strategies || []);
+                        updateStrategiesPerformanceTable(data.strategies || []);
+                    } catch (e) {
+                        console.warn('PnL by strategies load failed', e);
+                    }
+                }
+                
+                function updatePnLStrategiesChart(strategies) {
+                    const ctx = document.getElementById('pnlStrategiesChart').getContext('2d');
+                    
+                    if (pnlStrategiesChart) {
+                        pnlStrategiesChart.destroy();
+                    }
+                    
+                    const labels = strategies.map(s => s.strategy);
+                    const data = strategies.map(s => s.total_pnl);
+                    const colors = data.map(pnl => pnl >= 0 ? '#4CAF50' : '#f44336');
+                    
+                    pnlStrategiesChart = new Chart(ctx, {
+                        type: 'pie',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                data: data,
+                                backgroundColor: colors,
+                                borderWidth: 2,
+                                borderColor: '#333'
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: {
+                                legend: {
+                                    position: 'bottom',
+                                    labels: {
+                                        color: '#fff'
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                function updateStrategiesPerformanceTable(strategies) {
+                    const tbody = document.getElementById('strategiesPerformanceBody');
+                    tbody.innerHTML = strategies.map(strategy => `
+                        <tr>
+                            <td>${strategy.strategy}</td>
+                            <td>${strategy.trade_count}</td>
+                            <td class="${strategy.total_pnl >= 0 ? 'positive' : 'negative'}">
+                                $${strategy.total_pnl.toFixed(2)}
+                            </td>
+                            <td class="${strategy.avg_pnl >= 0 ? 'positive' : 'negative'}">
+                                $${strategy.avg_pnl.toFixed(2)}
+                            </td>
+                            <td>${strategy.win_rate.toFixed(1)}%</td>
+                            <td class="positive">$${strategy.max_pnl.toFixed(2)}</td>
+                            <td class="negative">$${strategy.min_pnl.toFixed(2)}</td>
+                        </tr>
+                    `).join('');
+                }
+                
+                async function loadPerformanceCharts() {
+                    try {
+                        const res = await fetch('/api/performance-charts');
+                        const data = await res.json();
+                        updateDailyPerformanceChart(data.daily_performance || []);
+                    } catch (e) {
+                        console.warn('Performance charts load failed', e);
+                    }
+                }
+                
+                function updateDailyPerformanceChart(dailyData) {
+                    const ctx = document.getElementById('dailyPerformanceChart').getContext('2d');
+                    
+                    if (dailyPerformanceChart) {
+                        dailyPerformanceChart.destroy();
+                    }
+                    
+                    const labels = dailyData.map(d => new Date(d.date).toLocaleDateString());
+                    const pnlData = dailyData.map(d => d.daily_pnl);
+                    const cumulativeData = dailyData.map(d => d.cumulative_pnl);
+                    
+                    dailyPerformanceChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [
+                                {
+                                    label: 'Daily PnL',
+                                    data: pnlData,
+                                    borderColor: '#4CAF50',
+                                    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                                    tension: 0.1
+                                },
+                                {
+                                    label: 'Cumulative PnL',
+                                    data: cumulativeData,
+                                    borderColor: '#2196F3',
+                                    backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                                    tension: 0.1
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    ticks: {
+                                        color: '#fff'
+                                    },
+                                    grid: {
+                                        color: '#333'
+                                    }
+                                },
+                                x: {
+                                    ticks: {
+                                        color: '#fff'
+                                    },
+                                    grid: {
+                                        color: '#333'
+                                    }
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    labels: {
+                                        color: '#fff'
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                // Load enhanced analytics on page load (with delay to not impact initial load)
+                setTimeout(loadEnhancedAnalytics, 2000); // Delay 2 seconds after page load
+                setInterval(loadEnhancedAnalytics, 30000); // Refresh every 30 seconds
 
                 // Consider calling refreshRejections() inside ws.onmessage if you want WS-driven refresh too
             </script>

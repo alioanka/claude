@@ -21,9 +21,9 @@ class PositionSizer:
         self.portfolio_manager = portfolio_manager
         
         # Default risk parameters
-        self.default_risk_pct = 0.02  # 2% risk per trade
-        self.max_position_pct = 0.10  # 10% max position size
-        self.min_position_usd = 10    # $10 minimum position
+        self.default_risk_pct = 0.01  # 1% risk per trade
+        self.max_position_pct = 0.01  # 1% max position size
+        self.min_position_usd = 100   # $100 minimum position
         self.max_leverage = 3.0       # 3x max leverage
         
         # Position sizing methods

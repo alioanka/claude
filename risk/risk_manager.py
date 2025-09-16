@@ -23,12 +23,12 @@ class RiskManager:
         
         # Risk limits from config
         self.risk_limits = {
-            'max_position_size_percent': 10,  # 10% max per position
+            'max_position_size_percent': 1,  # 1% max per position
             'max_total_exposure_percent': 80,  # 80% max total exposure
             'max_daily_loss_percent': 5,      # 5% max daily loss
             'max_correlation': 0.7,           # 70% max correlation
-            'min_position_size_usd': 10,
-            'max_open_positions': 25       # $10 minimum position
+            'min_position_size_usd': 100,
+            'max_open_positions': 25       # 25 maximum positions
         }
         
         # Load risk rules from config
