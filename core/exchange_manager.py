@@ -30,7 +30,7 @@ def _normalize_symbol(sym: str) -> str:
 class PaperTradingEngine:
     """Simulates trading for paper trading mode"""
     
-    def __init__(self, initial_balance: float = 10000):
+    def __init__(self, initial_balance: float = 100000):
         self.balance = {
             'USDT': initial_balance,
             'total': initial_balance

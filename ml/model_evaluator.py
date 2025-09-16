@@ -178,7 +178,7 @@ class ModelEvaluator:
     def backtest_model_predictions(self,
                                  predictions: np.ndarray,
                                  actual_prices: np.ndarray,
-                                 initial_capital: float = 10000,
+                                 initial_capital: float = 100000,
                                  transaction_cost: float = 0.001) -> Dict[str, Any]:
         """
         Backtest trading performance based on model predictions.

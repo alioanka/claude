@@ -503,7 +503,7 @@ class PositionSizer:
                 return self.portfolio_manager.get_total_balance()
             return float(config.trading.initial_capital)
         except:
-            return 10000.0  # Default fallback
+            return 100000.0  # Default fallback
     
     def _get_available_balance(self) -> float:
         """Get available balance for new positions"""
