@@ -150,6 +150,10 @@ class ArbitrageStrategy(BaseStrategy):
                         max_confidence = confidence
                         best_signal = signal
                 
+                # If no signals found, return None
+                if best_signal is None:
+                    return None
+                
                 # If best_signal is already a StrategySignal, return it
                 if hasattr(best_signal, 'action'):
                     return best_signal
@@ -549,21 +553,22 @@ class ArbitrageStrategy(BaseStrategy):
             
             base_currency = symbol.replace('USDT', '')
             
-            # Define triangular pairs - avoid creating invalid symbols
+            # Define triangular pairs - only use valid trading pairs
             triangular_pairs = []
             
-            # Only create triangular pairs for valid combinations
-            if base_currency != "BTC":
-                triangular_pairs.append((f"{base_currency}USDT", "BTCUSDT", f"{base_currency}BTC"))
-            
-            if base_currency != "ETH":
-                triangular_pairs.append((f"{base_currency}USDT", "ETHUSDT", f"{base_currency}ETH"))
-            
-            # Add some common triangular pairs for major currencies
-            if base_currency in ["BTC", "ETH", "BNB"]:
-                # Use BNB pairs for triangular arbitrage
+            # Only create triangular pairs for major currencies with valid combinations
+            if base_currency in ["BTC", "ETH", "BNB", "ADA", "DOT", "LINK", "UNI", "LTC"]:
+                # Use BTC as intermediate currency for major pairs
+                if base_currency != "BTC":
+                    triangular_pairs.append((f"{base_currency}USDT", "BTCUSDT", "BTCUSDT"))
+                
+                # Use ETH as intermediate currency for major pairs
+                if base_currency != "ETH":
+                    triangular_pairs.append((f"{base_currency}USDT", "ETHUSDT", "ETHUSDT"))
+                
+                # Use BNB as intermediate currency for major pairs
                 if base_currency != "BNB":
-                    triangular_pairs.append((f"{base_currency}USDT", "BNBUSDT", f"{base_currency}BNB"))
+                    triangular_pairs.append((f"{base_currency}USDT", "BNBUSDT", "BNBUSDT"))
             
             # Skip if no valid triangular pairs
             if not triangular_pairs:
