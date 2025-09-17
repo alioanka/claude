@@ -155,7 +155,7 @@ class ArbitrageStrategy(BaseStrategy):
                     return None
                 
                 # If best_signal is already a StrategySignal, return it
-                if hasattr(best_signal, 'action'):
+                if hasattr(best_signal, 'action') and not isinstance(best_signal, dict):
                     return best_signal
                 
                 # Convert dictionary to StrategySignal object
