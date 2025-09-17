@@ -65,6 +65,23 @@ def setup_logger(name: str, level: Optional[str] = None) -> logging.Logger:
         )
         error_handler.setLevel(logging.WARNING)  # Changed from ERROR to WARNING
 
+        # Risk management handler - separate file for risk rejections
+        risk_handler = logging.handlers.RotatingFileHandler(
+            'logs/risk.log', maxBytes=5*1024*1024, backupCount=10,
+            delay=True, encoding='utf-8'
+        )
+        risk_handler.setLevel(logging.WARNING)
+        risk_handler.addFilter(lambda r: (
+            'risk' in r.name.lower() or 
+            'max position' in r.message.lower() or
+            'risk management rejection' in r.message.lower() or
+            'signal blocked by risk management' in r.message.lower() or
+            'max positions' in r.message.lower() or
+            'position limit' in r.message.lower() or
+            'exposure limit' in r.message.lower() or
+            'drawdown limit' in r.message.lower()
+        ))
+
         # Trades go to a separate file; filter so only trade/portfolio logs hit it
         trade_handler = logging.handlers.RotatingFileHandler(
             'logs/trades.log', maxBytes=10*1024*1024, backupCount=10,
@@ -84,11 +101,13 @@ def setup_logger(name: str, level: Optional[str] = None) -> logging.Logger:
         console_handler.setFormatter(console_formatter)
         file_handler.setFormatter(detailed_formatter)
         error_handler.setFormatter(detailed_formatter)
+        risk_handler.setFormatter(detailed_formatter)
         trade_handler.setFormatter(json_formatter)
 
         root.addHandler(console_handler)
         root.addHandler(file_handler)
         root.addHandler(error_handler)
+        root.addHandler(risk_handler)
         root.addHandler(trade_handler)
 
         _ROOT_INITIALIZED = True
@@ -135,6 +154,83 @@ class ColoredFormatter(logging.Formatter):
         record.name_colored = f"{name_color}{logger_name:15s}{self.RESET}"
         
         return super().format(record)
+
+class RiskLogger:
+    """Specialized logger for risk management operations"""
+    
+    def __init__(self, name: str):
+        self.logger = setup_logger(name)
+        self.rejection_count = 0
+        self.session_start = datetime.utcnow()
+    
+    def log_position_rejection(self, symbol: str, reason: str, current_positions: int, max_positions: int):
+        """Log position limit rejection"""
+        self.rejection_count += 1
+        self.logger.warning(
+            f"🚫 POSITION REJECTION #{self.rejection_count}: {symbol} - {reason} "
+            f"(Current: {current_positions}/{max_positions})"
+        )
+    
+    def log_exposure_rejection(self, symbol: str, current_exposure: float, max_exposure: float, reason: str):
+        """Log exposure limit rejection"""
+        self.rejection_count += 1
+        exposure_pct = (current_exposure / max_exposure) * 100 if max_exposure > 0 else 0
+        self.logger.warning(
+            f"🚫 EXPOSURE REJECTION #{self.rejection_count}: {symbol} - {reason} "
+            f"(Exposure: {exposure_pct:.1f}% of limit)"
+        )
+    
+    def log_drawdown_rejection(self, symbol: str, current_drawdown: float, max_drawdown: float, reason: str = "Drawdown limit exceeded"):
+        """Log drawdown limit rejection"""
+        self.rejection_count += 1
+        drawdown_pct = (current_drawdown / max_drawdown) * 100 if max_drawdown > 0 else 0
+        self.logger.warning(
+            f"🚫 DRAWDOWN REJECTION #{self.rejection_count}: {symbol} - {reason} "
+            f"(Drawdown {drawdown_pct:.1f}% exceeds limit)"
+        )
+    
+    def log_correlation_rejection(self, symbol: str, correlated_symbol: str, correlation: float, threshold: float, reason: str = "High correlation"):
+        """Log correlation limit rejection"""
+        self.rejection_count += 1
+        self.logger.warning(
+            f"🚫 CORRELATION REJECTION #{self.rejection_count}: {symbol} - {reason} "
+            f"(Correlation with {correlated_symbol}: {correlation:.3f}, threshold: {threshold:.3f})"
+        )
+    
+    def log_volatility_rejection(self, symbol: str, volatility: float, threshold: float, reason: str):
+        """Log volatility-based rejection"""
+        self.rejection_count += 1
+        self.logger.warning(
+            f"🚫 VOLATILITY REJECTION #{self.rejection_count}: {symbol} - {reason} "
+            f"(Volatility: {volatility:.3f}, threshold: {threshold:.3f})"
+        )
+    
+    def log_risk_override(self, symbol: str, original_decision: str, new_decision: str, reason: str):
+        """Log risk management override"""
+        self.logger.info(
+            f"🔄 RISK OVERRIDE: {symbol} - {original_decision} → {new_decision} ({reason})"
+        )
+    
+    def log_risk_metrics(self, total_exposure: float, max_exposure: float, 
+                        current_drawdown: float, max_drawdown: float, 
+                        positions_count: int, max_positions: int):
+        """Log current risk metrics"""
+        exposure_pct = (total_exposure / max_exposure) * 100 if max_exposure > 0 else 0
+        drawdown_pct = (current_drawdown / max_drawdown) * 100 if max_drawdown > 0 else 0
+        
+        self.logger.info(
+            f"📊 RISK METRICS: Exposure {exposure_pct:.1f}% | "
+            f"Drawdown {drawdown_pct:.1f}% | Positions {positions_count}/{max_positions}"
+        )
+    
+    def get_session_stats(self):
+        """Get session statistics"""
+        runtime = datetime.utcnow() - self.session_start
+        return {
+            'session_start': self.session_start.isoformat(),
+            'runtime_hours': runtime.total_seconds() / 3600,
+            'rejection_count': self.rejection_count
+        }
 
 class TradingLogger:
     """Specialized logger for trading operations"""
@@ -419,6 +515,7 @@ class ErrorNotificationLogger:
 # Global logger instances
 main_logger = setup_logger("main")
 trading_logger = TradingLogger("trading")
+risk_logger = RiskLogger("risk")
 performance_logger = PerformanceLogger("main")
 audit_logger = AuditLogger()
 error_notification_logger = ErrorNotificationLogger()
@@ -548,6 +645,7 @@ def initialize_logging_system():
 __all__ = [
     'setup_logger',
     'TradingLogger',
+    'RiskLogger',
     'PerformanceLogger',
     'AuditLogger',
     'ErrorNotificationLogger',
@@ -557,6 +655,7 @@ __all__ = [
     'initialize_logging_system',
     'main_logger',
     'trading_logger',
+    'risk_logger',
     'performance_logger',
     'audit_logger',
     'error_notification_logger'
