@@ -19,17 +19,17 @@ class MomentumStrategy(BaseStrategy):
     
     def __init__(self, parameters: Dict[str, Any] = None):
         default_params = {
-            'ema_fast': 12,
-            'ema_slow': 26,
+            'ema_fast': 8,            # 8 (was 12) - more responsive
+            'ema_slow': 21,           # 21 (was 26) - more responsive
             'rsi_period': 14,
-            'rsi_overbought': 70,
-            'rsi_oversold': 30,
-            'macd_fast': 12,
-            'macd_slow': 26,
+            'rsi_overbought': 75,     # 75 (was 70) - less sensitive
+            'rsi_oversold': 25,       # 25 (was 30) - less sensitive
+            'macd_fast': 8,           # 8 (was 12) - more responsive
+            'macd_slow': 21,          # 21 (was 26) - more responsive
             'macd_signal': 9,
-            'volume_threshold': 1.5,  # Volume must be 1.5x average
+            'volume_threshold': 2.0,  # 2.0 (was 1.5) - higher volume requirement
             'atr_period': 14,
-            'min_trend_strength': 0.02,  # 2% minimum trend strength
+            'min_trend_strength': 0.03,  # 3% (was 2%) - stronger trend requirement
         }
         
         if parameters:
@@ -43,9 +43,9 @@ class MomentumStrategy(BaseStrategy):
         
         # Strategy-specific settings
         self.requires_trend = True
-        self.min_confidence = 0.50
-        self.stop_loss_pct = 0.025  # 2.5% stop loss
-        self.take_profit_pct = 0.055  # 5.5% take profit
+        self.min_confidence = 0.60   # Higher from 0.50 - better signal quality
+        self.stop_loss_pct = 0.02    # 2% (was 2.5%) - tighter stop loss
+        self.take_profit_pct = 0.04  # 4% (was 5.5%) - more achievable
     
     def get_required_data(self) -> Dict[str, Any]:
         """Get data requirements"""

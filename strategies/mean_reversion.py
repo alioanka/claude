@@ -20,19 +20,19 @@ class MeanReversionStrategy(BaseStrategy):
     def __init__(self, parameters: Dict[str, Any] = None):
         default_params = {
             'bb_period': 20,
-            'bb_std_dev': 2.0,
+            'bb_std_dev': 1.5,        # 1.5 (was 2.0) - more sensitive
             'rsi_period': 14,
-            'rsi_overbought': 75,
-            'rsi_oversold': 25,
+            'rsi_overbought': 70,     # 70 (was 75) - less extreme
+            'rsi_oversold': 30,       # 30 (was 25) - less extreme
             'stoch_period': 14,
             'stoch_d_period': 3,
-            'z_score_period': 50,
-            'z_score_threshold': 1.6,
+            'z_score_period': 30,     # 30 (was 50) - shorter period
+            'z_score_threshold': 1.0, # 1.0 (was 1.6) - more sensitive
             'volume_confirmation': True,
-            'volume_threshold': 1.2,
-            'max_holding_time': 240,  # minutes
-            'profit_target_pct': 0.03,  # 3%
-            'stop_loss_pct': 0.025,    # 2.5%
+            'volume_threshold': 1.0,  # 1.0 (was 1.2) - less strict
+            'max_holding_time': 180,  # 3 hours (was 240) - shorter
+            'profit_target_pct': 0.025, # 2.5% (was 3%) - more achievable
+            'stop_loss_pct': 0.02,    # 2% (was 2.5%) - tighter
         }
         
         if parameters:
@@ -46,7 +46,7 @@ class MeanReversionStrategy(BaseStrategy):
         
         # Strategy-specific settings
         self.requires_trend = False  # Works better in ranging markets
-        self.min_confidence = 0.6
+        self.min_confidence = 0.4   # Lower from 0.6 to generate more signals
         self.stop_loss_pct = self.parameters['stop_loss_pct']
         self.take_profit_pct = self.parameters['profit_target_pct']
         

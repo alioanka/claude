@@ -379,8 +379,8 @@ class PortfolioManager:
             else:  # short
                 pnl_pct = (position.entry_price - position.current_price) / position.entry_price
             
-            # Check if we should activate trailing stop loss (3% profit)
-            trailing_activation_threshold = 0.03  # 3%
+            # Check if we should activate trailing stop loss (2% profit)
+            trailing_activation_threshold = 0.02  # 2% (was 3%) - earlier activation
             
             if pnl_pct >= trailing_activation_threshold:
                 # Check if we need to update the stop loss to breakeven

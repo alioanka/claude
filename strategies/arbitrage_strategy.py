@@ -28,13 +28,13 @@ logger = setup_logger(__name__)
 @dataclass
 class ArbitrageConfig:
     """Configuration for arbitrage strategy"""
-    min_spread_threshold: float = 0.002  # 0.2% minimum spread
-    max_spread_threshold: float = 0.05   # 5% maximum spread (might be error)
-    correlation_threshold: float = 0.7   # Minimum correlation for pair trading
-    lookback_period: int = 100           # Periods for correlation calculation
-    z_score_threshold: float = 0.8       # Z-score threshold for mean reversion
-    max_position_hold_time: int = 24     # Maximum hours to hold position
-    transaction_cost: float = 0.001      # Total transaction costs (0.1%)
+    min_spread_threshold: float = 0.001  # 0.1% minimum spread (was 0.2%)
+    max_spread_threshold: float = 0.08   # 8% maximum spread (was 5%)
+    correlation_threshold: float = 0.6   # Minimum correlation for pair trading (was 0.7)
+    lookback_period: int = 50            # Periods for correlation calculation (was 100)
+    z_score_threshold: float = 0.5       # Z-score threshold for mean reversion (was 0.8)
+    max_position_hold_time: int = 12     # Maximum hours to hold position (was 24)
+    transaction_cost: float = 0.0005     # Total transaction costs (0.05%, was 0.1%)
 
 class ArbitrageStrategy(BaseStrategy):
     """
@@ -49,6 +49,9 @@ class ArbitrageStrategy(BaseStrategy):
         self.config = config or {}
         self.arb_config = ArbitrageConfig(**self.config.get('arbitrage_params', {}))
         self.indicators = TechnicalIndicators()
+        
+        # Lower confidence threshold for arbitrage (was 0.5)
+        self.min_confidence = 0.3
         
         # Exchange connections for cross-exchange arbitrage
         self.exchanges = {}
@@ -364,16 +367,21 @@ class ArbitrageStrategy(BaseStrategy):
     async def _fetch_ticker(self, exchange, symbol: str) -> Optional[Dict]:
         """Fetch ticker data from exchange (normalize symbol, robust fields)."""
         try:
-            # Try the symbol as-is first (most exchanges expect this format)
+            # Always use slash format for consistency across exchanges
+            if "/" not in symbol and symbol.endswith(("USDT", "USD", "USDC")):
+                base = symbol[:-4] if symbol.endswith("USDT") else symbol[:-3]
+                quote = symbol[-4:] if symbol.endswith("USDT") else symbol[-3:]
+                normalized_symbol = f"{base}/{quote}"
+            else:
+                normalized_symbol = symbol
+                
             try:
-                t = exchange.fetch_ticker(symbol)
+                t = exchange.fetch_ticker(normalized_symbol)
             except Exception:
-                # If that fails, try with slash format
-                if "/" not in symbol and symbol.endswith(("USDT", "USD", "USDC")):
-                    base = symbol[:-4] if symbol.endswith("USDT") else symbol[:-3]
-                    quote = symbol[-4:] if symbol.endswith("USDT") else symbol[-3:]
-                    normalized_symbol = f"{base}/{quote}"
-                    t = exchange.fetch_ticker(normalized_symbol)
+                # Fallback: try without slash for exchanges that prefer it
+                if "/" in normalized_symbol:
+                    base_symbol = normalized_symbol.replace("/", "")
+                    t = exchange.fetch_ticker(base_symbol)
                 else:
                     raise
 

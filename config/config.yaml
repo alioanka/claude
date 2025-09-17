@@ -72,17 +72,17 @@ ml:
 # Strategy Configuration
 strategies:
   strategy_allocation:
-    momentum_strategy: 0.45
-    mean_reversion: 0.45
+    momentum_strategy: 0.60    # 60% (was 45%) - better performing strategy
+    mean_reversion: 0.30      # 30% (was 45%) - more conservative allocation
     ml_strategy: 0.0
-    arbitrage_strategy: 0.10
+    arbitrage_strategy: 0.10  # 10% (unchanged)
   mean_reversion:
     enabled: true
     lookback_period: 20
-    entry_threshold: 2.0    # Bollinger Band standard deviations
+    entry_threshold: 1.5    # 1.5 (was 2.0) - more sensitive Bollinger Band
     exit_threshold: 0.5
-    stop_loss: 0.03
-    take_profit: 0.06
+    stop_loss: 0.02         # 2% (was 3%) - tighter stop loss
+    take_profit: 0.025      # 2.5% (was 6%) - more achievable target
     
   ml_strategy:
     enabled: false
@@ -93,12 +93,12 @@ strategies:
   arbitrage_strategy:
     parameters:
       arbitrage_params:
-        min_spread_threshold: 0.004
-        max_spread_threshold: 0.08
-        correlation_threshold: 0.80
-        lookback_period: 200
-        z_score_threshold: 2.0
-        transaction_cost: 0.002
+        min_spread_threshold: 0.001  # 0.1% (was 0.4%) - more opportunities
+        max_spread_threshold: 0.08   # 8% (unchanged)
+        correlation_threshold: 0.60  # 0.6 (was 0.8) - more pairs qualify
+        lookback_period: 50          # 50 (was 200) - faster calculation
+        z_score_threshold: 0.5       # 0.5 (was 2.0) - more sensitive
+        transaction_cost: 0.0005     # 0.05% (was 0.2%) - lower costs
     exchanges:
       binance:
         enabled: true
@@ -111,17 +111,20 @@ strategies:
         secret: "${KUCOIN_API_SECRET}"
         sandbox: false
       bybit:
-        enabled: false
+        enabled: true         # Enable ByBit for arbitrage
         api_key: "${BYBIT_API_KEY}"
         secret: "${BYBIT_API_SECRET}"
         sandbox: false
 
 # Risk Management
 risk:
-  max_open_positions: 5
-  max_daily_loss: 0.05     # 5% max daily loss
+  max_open_positions: 25    # 25 (was 5) - allow more positions for data collection
+  max_daily_loss: 0.03      # 3% (was 5%) - tighter daily loss limit
   position_sizing_method: "percent_risk"
-  default_risk_per_trade: 0.02  # 2% risk per trade
+  default_risk_per_trade: 0.01  # 1% (was 2%) - lower risk per trade
+  max_correlation: 0.7      # Add correlation limit
+  volatility_filter: true   # Add volatility filter
+  min_volume_ratio: 1.5     # Add volume filter
   
 # Notifications
 notifications:
