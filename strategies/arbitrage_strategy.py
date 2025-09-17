@@ -16,7 +16,14 @@ from strategies.base_strategy import BaseStrategy, StrategySignal
 
 from utils.indicators import TechnicalIndicators
 
-logger = logging.getLogger(__name__)
+# route strategy logs into the trading_bot root so file handlers pick them up
+try:
+    from utils.logger import setup_logger
+except Exception:
+    # fallback if the project exposes it at repo root
+    from logger import setup_logger
+
+logger = setup_logger(__name__)
 
 @dataclass
 class ArbitrageConfig:
@@ -237,8 +244,11 @@ class ArbitrageStrategy(BaseStrategy):
                 detail = {"spread": round(best, 5) if isinstance(best, (int,float)) else None}
                 return self._no_signal(symbol, "No arb opportunity", detail=detail)
 
+            # --- normalize: support both dict and StrategySignal without crashing ---
+            def _g(obj, key, default=None):
+                return obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)
 
-            action = sig.get("action") or sig.get("side")
+            action = _g(sig, "action") or _g(sig, "side")
             action = (str(action).lower() if action else "hold")
             if action in ("long", "buy"):
                 action = "buy"
@@ -247,10 +257,10 @@ class ArbitrageStrategy(BaseStrategy):
             else:
                 action = "hold"
 
-            conf = float(sig.get("confidence", 0.0))
-            entry = sig.get("entry_price") or sig.get("buy_price") or sig.get("sell_price")
-            sl = sig.get("stop_loss")
-            tp = sig.get("take_profit")
+            conf = float(_g(sig, "confidence", 0.0) or 0.0)
+            entry = _g(sig, "entry_price") or _g(sig, "buy_price") or _g(sig, "sell_price")
+            sl = _g(sig, "stop_loss")
+            tp = _g(sig, "take_profit")
 
             return StrategySignal(
                 symbol=symbol,
@@ -260,12 +270,12 @@ class ArbitrageStrategy(BaseStrategy):
                 stop_loss=sl,
                 take_profit=tp,
                 position_size=None,
-                reasoning=sig.get("reasoning", "arbitrage"),
-                timeframe="1m",
+                reasoning=_g(sig, "reasoning", "arbitrage"),
+                timeframe=_g(sig, "timeframe", "1m"),
                 strategy_name=self.name
             )
         except Exception as e:
-            logger.error(f"[ArbitrageStrategy] analyze failed for {symbol}: {e}")
+            logger.exception(f"[ArbitrageStrategy] analyze failed for {symbol}: {e}")
             return self._no_signal(symbol, f"error: {e}")
 
 

@@ -308,10 +308,17 @@ class StrategyManager:
             conf = 0.0
 
         # Do NOT change this prefix/shape unless you also update the dashboard parser.
-        logger.info(
-            "REJECTION | strategy=%s symbol=%s reason=%s conf=%.3f",
-            strategy_name, symbol, str(reason).strip(), conf
-        )
+        # Log as ERROR if it's an actual error, INFO if it's a normal rejection
+        if "error:" in str(reason).lower():
+            logger.error(
+                "REJECTION | strategy=%s symbol=%s reason=%s conf=%.3f",
+                strategy_name, symbol, str(reason).strip(), conf
+            )
+        else:
+            logger.info(
+                "REJECTION | strategy=%s symbol=%s reason=%s conf=%.3f",
+                strategy_name, symbol, str(reason).strip(), conf
+            )
 
     def get_strategy_performance(self) -> Dict[str, Any]:
         """Get performance metrics for all strategies"""
