@@ -58,11 +58,12 @@ def setup_logger(name: str, level: Optional[str] = None) -> logging.Logger:
         )
         file_handler.setLevel(logging.DEBUG)
 
+        # Error and warning handler - captures both ERROR and WARNING levels
         error_handler = logging.handlers.RotatingFileHandler(
             'logs/error.log', maxBytes=10*1024*1024, backupCount=5,
             delay=True, encoding='utf-8'
         )
-        error_handler.setLevel(logging.ERROR)
+        error_handler.setLevel(logging.WARNING)  # Changed from ERROR to WARNING
 
         # Trades go to a separate file; filter so only trade/portfolio logs hit it
         trade_handler = logging.handlers.RotatingFileHandler(
@@ -98,64 +99,6 @@ def setup_logger(name: str, level: Optional[str] = None) -> logging.Logger:
     child.handlers = []  # ensure no duplicate handlers on children
     return child
 
-    
-    # Console handler with colored output
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
-    
-    # File handler with rotation
-    file_handler = logging.handlers.RotatingFileHandler(
-        'logs/trading_bot.log',
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=5
-    )
-    file_handler.setLevel(logging.DEBUG)
-    
-    # Error file handler
-    error_handler = logging.handlers.RotatingFileHandler(
-        'logs/error.log',
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=5
-    )
-    error_handler.setLevel(logging.ERROR)
-    
-    # Trade log handler (separate file for trades)
-    trade_handler = logging.handlers.RotatingFileHandler(
-        'logs/trades.log',
-        maxBytes=10*1024*1024,  # 10MB
-        backupCount=10
-    )
-    trade_handler.setLevel(logging.INFO)
-    
-    # Formatters
-    detailed_formatter = logging.Formatter(
-        '%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s'
-    )
-    
-    console_formatter = ColoredFormatter(
-        '%(asctime)s | %(levelname_colored)s | %(name_colored)s | %(message)s'
-    )
-    
-    json_formatter = logging.Formatter(
-        '{"timestamp": "%(asctime)s", "level": "%(levelname)s", "logger": "%(name)s", "message": "%(message)s"}'
-    )
-    
-    # Set formatters
-    console_handler.setFormatter(console_formatter)
-    file_handler.setFormatter(detailed_formatter)
-    error_handler.setFormatter(detailed_formatter)
-    trade_handler.setFormatter(json_formatter)
-    
-    # Add handlers
-    logger.addHandler(console_handler)
-    logger.addHandler(file_handler)
-    logger.addHandler(error_handler)
-    
-    # Add trade handler only for specific loggers
-    if 'trade' in name.lower() or 'portfolio' in name.lower():
-        logger.addHandler(trade_handler)
-    
-    return logger
 
 class ColoredFormatter(logging.Formatter):
     """Colored formatter for console output"""

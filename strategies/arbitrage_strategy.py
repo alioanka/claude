@@ -136,7 +136,23 @@ class ArbitrageStrategy(BaseStrategy):
             
             # Return highest confidence signal
             if signals:
-                best_signal = max(signals, key=lambda s: s.get('confidence', 0))
+                # Find the signal with highest confidence
+                best_signal = None
+                max_confidence = 0
+                
+                for signal in signals:
+                    if isinstance(signal, dict):
+                        confidence = signal.get('confidence', 0)
+                    else:
+                        confidence = getattr(signal, 'confidence', 0)
+                    
+                    if confidence > max_confidence:
+                        max_confidence = confidence
+                        best_signal = signal
+                
+                # If best_signal is already a StrategySignal, return it
+                if hasattr(best_signal, 'action'):
+                    return best_signal
                 
                 # Convert dictionary to StrategySignal object
                 action = best_signal.get('action', best_signal.get('signal_type', 'hold'))
@@ -334,13 +350,18 @@ class ArbitrageStrategy(BaseStrategy):
     async def _fetch_ticker(self, exchange, symbol: str) -> Optional[Dict]:
         """Fetch ticker data from exchange (normalize symbol, robust fields)."""
         try:
-            # Normalize e.g. BTCUSDT -> BTC/USDT, ETHUSDC -> ETH/USDC
-            if "/" not in symbol and symbol.endswith(("USDT", "USD", "USDC")):
-                base = symbol[:-4] if symbol.endswith("USDT") else symbol[:-3]
-                quote = symbol[-4:] if symbol.endswith("USDT") else symbol[-3:]
-                symbol = f"{base}/{quote}"
-
-            t = exchange.fetch_ticker(symbol)
+            # Try the symbol as-is first (most exchanges expect this format)
+            try:
+                t = exchange.fetch_ticker(symbol)
+            except Exception:
+                # If that fails, try with slash format
+                if "/" not in symbol and symbol.endswith(("USDT", "USD", "USDC")):
+                    base = symbol[:-4] if symbol.endswith("USDT") else symbol[:-3]
+                    quote = symbol[-4:] if symbol.endswith("USDT") else symbol[-3:]
+                    normalized_symbol = f"{base}/{quote}"
+                    t = exchange.fetch_ticker(normalized_symbol)
+                else:
+                    raise
 
             # Some exchanges omit bid/ask; derive from last where possible
             bid = t.get("bid")
@@ -528,11 +549,25 @@ class ArbitrageStrategy(BaseStrategy):
             
             base_currency = symbol.replace('USDT', '')
             
-            # Define triangular pairs
-            triangular_pairs = [
-                (f"{base_currency}USDT", "BTCUSDT", f"{base_currency}BTC"),
-                (f"{base_currency}USDT", "ETHUSDT", f"{base_currency}ETH")
-            ]
+            # Define triangular pairs - avoid creating invalid symbols
+            triangular_pairs = []
+            
+            # Only create triangular pairs for valid combinations
+            if base_currency != "BTC":
+                triangular_pairs.append((f"{base_currency}USDT", "BTCUSDT", f"{base_currency}BTC"))
+            
+            if base_currency != "ETH":
+                triangular_pairs.append((f"{base_currency}USDT", "ETHUSDT", f"{base_currency}ETH"))
+            
+            # Add some common triangular pairs for major currencies
+            if base_currency in ["BTC", "ETH", "BNB"]:
+                # Use BNB pairs for triangular arbitrage
+                if base_currency != "BNB":
+                    triangular_pairs.append((f"{base_currency}USDT", "BNBUSDT", f"{base_currency}BNB"))
+            
+            # Skip if no valid triangular pairs
+            if not triangular_pairs:
+                return None
             
             best_opportunity = None
             max_profit = 0
@@ -587,15 +622,29 @@ class ArbitrageStrategy(BaseStrategy):
                                    pair3: str) -> float:
         """Calculate profit from triangular arbitrage"""
         try:
-            # Simplified triangular arbitrage calculation
-            # Real implementation would consider all possible paths and fees
+            # Check if all required prices are available and valid
+            if pair1 not in prices or pair2 not in prices or pair3 not in prices:
+                return 0
             
-            p1_bid = prices[pair1]['bid']
-            p1_ask = prices[pair1]['ask']
-            p2_bid = prices[pair2]['bid'] 
-            p2_ask = prices[pair2]['ask']
-            p3_bid = prices[pair3]['bid']
-            p3_ask = prices[pair3]['ask']
+            p1_data = prices[pair1]
+            p2_data = prices[pair2]
+            p3_data = prices[pair3]
+            
+            # Get bid/ask prices with None checks
+            p1_bid = p1_data.get('bid')
+            p1_ask = p1_data.get('ask')
+            p2_bid = p2_data.get('bid')
+            p2_ask = p2_data.get('ask')
+            p3_bid = p3_data.get('bid')
+            p3_ask = p3_data.get('ask')
+            
+            # Check for None values
+            if None in [p1_bid, p1_ask, p2_bid, p2_ask, p3_bid, p3_ask]:
+                return 0
+            
+            # Check for zero values to avoid division by zero
+            if 0 in [p1_ask, p2_ask, p3_ask, p3_bid]:
+                return 0
             
             # Calculate cross rate
             implied_rate = (p1_bid / p2_ask) * p2_bid / p3_ask
