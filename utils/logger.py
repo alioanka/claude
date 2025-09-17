@@ -64,6 +64,18 @@ def setup_logger(name: str, level: Optional[str] = None) -> logging.Logger:
             delay=True, encoding='utf-8'
         )
         error_handler.setLevel(logging.WARNING)  # Changed from ERROR to WARNING
+        
+        # Filter out risk management messages from error.log
+        error_handler.addFilter(lambda r: not (
+            'risk' in r.name.lower() or 
+            'max position' in r.message.lower() or
+            'risk management rejection' in r.message.lower() or
+            'signal blocked by risk management' in r.message.lower() or
+            'max positions' in r.message.lower() or
+            'position limit' in r.message.lower() or
+            'exposure limit' in r.message.lower() or
+            'drawdown limit' in r.message.lower()
+        ))
 
         # Risk management handler - separate file for risk rejections
         risk_handler = logging.handlers.RotatingFileHandler(
