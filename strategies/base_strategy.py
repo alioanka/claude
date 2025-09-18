@@ -79,8 +79,8 @@ class BaseStrategy(ABC):
         self.lookback_period = 100  # Number of candles to analyze
         
         # Risk parameters
-        self.stop_loss_pct = float(getattr(config.trading, 'stop_loss_percent', 0.03))  # 3% stop loss
-        self.take_profit_pct = float(getattr(config.trading, 'take_profit_percent', 0.06))  # 6% take profit
+        self.stop_loss_pct = float(getattr(config.trading, 'stop_loss_percent', 0.01))  # 1% stop loss
+        self.take_profit_pct = float(getattr(config.trading, 'take_profit_percent', 0.025))  # 2.5% take profit
         self.max_risk_per_trade = 0.01  # 1% portfolio risk per trade
         
         logger.info(f"🎯 Strategy initialized: {self.name}")

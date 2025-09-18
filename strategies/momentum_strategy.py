@@ -44,8 +44,8 @@ class MomentumStrategy(BaseStrategy):
         # Strategy-specific settings
         self.requires_trend = True
         self.min_confidence = 0.60   # Higher from 0.50 - better signal quality
-        self.stop_loss_pct = 0.02    # 2% (was 2.5%) - tighter stop loss
-        self.take_profit_pct = 0.04  # 4% (was 5.5%) - more achievable
+        self.stop_loss_pct = 0.01    # 1% (was 2%) - very tight stop loss
+        self.take_profit_pct = 0.025 # 2.5% (was 4%) - more achievable
     
     def get_required_data(self) -> Dict[str, Any]:
         """Get data requirements"""

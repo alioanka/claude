@@ -530,8 +530,8 @@ class ArbitrageStrategy(BaseStrategy):
                 
                 # Calculate stop loss and take profit
                 atr = recent_data['close'].rolling(window=14).std().iloc[-1] * 2
-                stop_loss = entry_price * (0.98 if signal_type == 'buy' else 1.02)
-                take_profit = entry_price * (1.02 if signal_type == 'buy' else 0.98)
+                stop_loss = entry_price * (0.99 if signal_type == 'buy' else 1.01)  # 1% SL
+                take_profit = entry_price * (1.025 if signal_type == 'buy' else 0.975)  # 2.5% TP
                 
                 return {
                     'action': signal_type,

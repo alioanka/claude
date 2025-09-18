@@ -57,7 +57,7 @@
   - `transaction_cost`: 0.002 → 0.0005
 - **ByBit Exchange**: Enabled for arbitrage
 - **Risk Management**:
-  - `max_open_positions`: 5 → 25
+  - `max_open_positions`: 5 → 50 (increased for more data collection)
   - `max_daily_loss`: 0.05 → 0.03 (3%)
   - `default_risk_per_trade`: 0.02 → 0.01 (1%)
   - Added correlation limit, volatility filter, volume filter
@@ -85,7 +85,7 @@
 ### **Overall System**
 - ✅ Better strategy allocation (60% momentum, 30% mean reversion)
 - ✅ Improved risk management
-- ✅ More data collection opportunities
+- ✅ More data collection opportunities (50 max positions)
 
 ## 🚀 **NEXT STEPS**
 

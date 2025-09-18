@@ -28,7 +28,7 @@ class RiskManager:
             'max_daily_loss_percent': 5,      # 5% max daily loss
             'max_correlation': 0.7,           # 70% max correlation
             'min_position_size_usd': 100,
-            'max_open_positions': 25       # 25 maximum positions
+            'max_open_positions': 50       # 50 maximum positions
         }
         
         # Load risk rules from config

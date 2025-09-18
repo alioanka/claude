@@ -28,11 +28,11 @@ class TradingConfig:
     """Trading configuration settings"""
     mode: str = os.getenv("TRADING_MODE", "paper")  # paper or live
     initial_capital: float = float(os.getenv("INITIAL_CAPITAL", "100000"))
-    max_positions: int = int(os.getenv("MAX_POSITIONS", "25"))
+    max_positions: int = int(os.getenv("MAX_POSITIONS", "50"))
     risk_per_trade: float = float(os.getenv("RISK_PER_TRADE", "0.01"))
     max_drawdown: float = float(os.getenv("MAX_DRAWDOWN", "0.15"))
-    stop_loss_percent: float = float(os.getenv("STOP_LOSS_PERCENT", "0.03"))
-    take_profit_percent: float = float(os.getenv("TAKE_PROFIT_PERCENT", "0.06"))
+    stop_loss_percent: float = float(os.getenv("STOP_LOSS_PERCENT", "0.01"))
+    take_profit_percent: float = float(os.getenv("TAKE_PROFIT_PERCENT", "0.025"))
     max_leverage: float = float(os.getenv("MAX_LEVERAGE", "3"))
     
 @dataclass

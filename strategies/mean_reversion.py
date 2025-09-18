@@ -32,7 +32,7 @@ class MeanReversionStrategy(BaseStrategy):
             'volume_threshold': 1.0,  # 1.0 (was 1.2) - less strict
             'max_holding_time': 180,  # 3 hours (was 240) - shorter
             'profit_target_pct': 0.025, # 2.5% (was 3%) - more achievable
-            'stop_loss_pct': 0.02,    # 2% (was 2.5%) - tighter
+            'stop_loss_pct': 0.01,    # 1% (was 2%) - very tight
         }
         
         if parameters:

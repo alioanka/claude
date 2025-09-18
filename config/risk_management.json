@@ -6,15 +6,15 @@
       "min_position_size_usd": 100
     },
     "stop_loss": {
-      "default_stop_loss_percent": 5,
+      "default_stop_loss_percent": 1,
       "trailing_stop_enabled": true,
-      "trailing_stop_percent": 3,
-      "max_stop_loss_percent": 15
+      "trailing_stop_percent": 1,
+      "max_stop_loss_percent": 2
     },
     "take_profit": {
-      "default_take_profit_percent": 10,
+      "default_take_profit_percent": 2.5,
       "partial_take_profit_enabled": true,
-      "partial_take_profit_levels": [5, 8, 12],
+      "partial_take_profit_levels": [1.5, 2.0, 2.5],
       "partial_take_profit_percentages": [25, 35, 40]
     },
     "drawdown_protection": {
@@ -35,8 +35,8 @@
       "correlation_threshold": 0.7
     },
     "market_conditions": {
-      "bull_market_max_positions": 25,
-      "bear_market_max_positions": 15,
-      "sideways_market_max_positions": 20
+      "bull_market_max_positions": 50,
+      "bear_market_max_positions": 30,
+      "sideways_market_max_positions": 40
     }
   }
