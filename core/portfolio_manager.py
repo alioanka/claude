@@ -50,18 +50,43 @@ class PortfolioPosition:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
-        # Calculate position duration
-        duration_seconds = (datetime.utcnow() - self.timestamp).total_seconds()
-        duration_hours = duration_seconds / 3600
-        duration_days = duration_hours / 24
-        
-        # Format duration string
-        if duration_days >= 1:
-            duration_str = f"{int(duration_days)}d {int(duration_hours % 24)}h"
-        elif duration_hours >= 1:
-            duration_str = f"{int(duration_hours)}h {int((duration_seconds % 3600) / 60)}m"
-        else:
-            duration_str = f"{int(duration_seconds / 60)}m"
+        # Calculate position duration with timezone handling
+        try:
+            # Ensure both timestamps are timezone-aware or both naive
+            now = datetime.utcnow()
+            
+            # Handle timezone issues by normalizing both timestamps
+            if self.timestamp.tzinfo is None:
+                # If timestamp is naive, assume it's UTC
+                timestamp_utc = self.timestamp
+            else:
+                # If timestamp has timezone info, convert to UTC
+                timestamp_utc = self.timestamp.utctimetuple()
+                timestamp_utc = datetime(*timestamp_utc[:6])
+            
+            # Calculate duration
+            duration_seconds = (now - timestamp_utc).total_seconds()
+            
+            # Handle negative duration (future timestamps)
+            if duration_seconds < 0:
+                duration_str = "0m"
+                duration_hours = 0
+            else:
+                duration_hours = duration_seconds / 3600
+                duration_days = duration_hours / 24
+                
+                # Format duration string
+                if duration_days >= 1:
+                    duration_str = f"{int(duration_days)}d {int(duration_hours % 24)}h"
+                elif duration_hours >= 1:
+                    duration_str = f"{int(duration_hours)}h {int((duration_seconds % 3600) / 60)}m"
+                else:
+                    duration_str = f"{int(duration_seconds / 60)}m"
+                    
+        except Exception as e:
+            # Fallback if duration calculation fails
+            duration_str = "N/A"
+            duration_hours = 0
         
         return {
             'symbol': self.symbol,
@@ -169,7 +194,7 @@ class PortfolioManager:
                         amount=pos_data['amount'],
                         entry_price=pos_data['entry_price'],
                         current_price=current_price,
-                        timestamp=datetime.fromtimestamp(pos_data['timestamp'] / 1000),
+                        timestamp=datetime.utcfromtimestamp(pos_data['timestamp'] / 1000),
                         strategy=pos_data.get('strategy', 'unknown')
                     )
                     

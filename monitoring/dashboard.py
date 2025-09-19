@@ -110,6 +110,31 @@ class DashboardManager:
         async def get_performance_charts():
             """Get performance chart data"""
             return await self.get_performance_charts_data()
+        
+        @self.app.get("/api/debug/positions")
+        async def debug_positions():
+            """Debug endpoint to check position data and duration calculation"""
+            try:
+                positions = await self.get_positions_data()
+                debug_info = []
+                
+                for pos in positions:
+                    debug_info.append({
+                        'symbol': pos.get('symbol', 'N/A'),
+                        'timestamp': pos.get('timestamp', 'N/A'),
+                        'duration': pos.get('duration', 'N/A'),
+                        'duration_hours': pos.get('duration_hours', 'N/A'),
+                        'has_timestamp': 'timestamp' in pos,
+                        'timestamp_type': type(pos.get('timestamp', None)).__name__ if 'timestamp' in pos else 'None'
+                    })
+                
+                return {
+                    'positions_count': len(positions),
+                    'debug_info': debug_info,
+                    'current_time_utc': datetime.utcnow().isoformat()
+                }
+            except Exception as e:
+                return {"error": str(e)}
 
         @self.app.post("/api/positions/{symbol}/close")
         async def api_close_position(symbol: str):
@@ -961,7 +986,7 @@ class DashboardManager:
                             <td>${(pos.current_price || pos.entry_price).toFixed(4)}</td>
                             <td class="${pos.pnl >= 0 ? 'positive' : 'negative'}">${pos.pnl.toFixed(2)}</td>
                             <td class="${pos.pnl_percentage >= 0 ? 'positive' : 'negative'}">${pos.pnl_percentage.toFixed(2)}%</td>
-                            <td title="${pos.duration_hours} hours">${pos.duration || 'N/A'}</td>
+                            <td title="${pos.duration_hours || 0} hours">${pos.duration || 'N/A'}</td>
                             <td>${pos.strategy}</td>
                             <td><button onclick="closePosition('${pos.symbol}')" style="padding:6px 10px; background:#ff9800; color:#fff; border:none; border-radius:6px; cursor:pointer;">Close</button></td>
                         </tr>
