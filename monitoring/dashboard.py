@@ -44,10 +44,10 @@ class DashboardManager:
             await self.connect(websocket)
             try:
                 while True:
-                    # Send real-time updates every 5 seconds
+                    # Send real-time updates every 3 seconds for better responsiveness
                     data = await self.get_real_time_data()
                     await self.broadcast(data)
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(3)
             except WebSocketDisconnect:
                 self.disconnect(websocket)
         
@@ -120,6 +120,10 @@ class DashboardManager:
             try:
                 if not getattr(self, "trade_executor", None):
                     return {"ok": False, "error": "trade_executor not wired to DashboardManager"}
+                
+                # 🔥 CRITICAL FIX: Refresh prices before closing to avoid "Position size has changed" error
+                await self.portfolio_manager.update_position_prices()
+                
                 res = await self.trade_executor.close_position(symbol)
                 return {"ok": bool(getattr(res, "success", False)), "error": getattr(res, "error_message", None)}
             except Exception as e:
@@ -139,6 +143,9 @@ class DashboardManager:
                 if not getattr(self, "trade_executor", None):
                     return {"ok": False, "error": "trade_executor not wired to DashboardManager"}
 
+                # 🔥 CRITICAL FIX: Refresh prices before closing all positions
+                await self.portfolio_manager.update_position_prices()
+                
                 positions = await self.portfolio_manager.get_positions()
                 for p in positions:
                     await self.trade_executor.close_position(p["symbol"])
@@ -758,6 +765,7 @@ class DashboardManager:
                                 <th>Current Price</th>
                                 <th>PnL</th>
                                 <th>PnL %</th>
+                                <th>Duration</th>
                                 <th>Strategy</th>
                                 <th>Actions</th>
                             </tr>
@@ -953,6 +961,7 @@ class DashboardManager:
                             <td>${(pos.current_price || pos.entry_price).toFixed(4)}</td>
                             <td class="${pos.pnl >= 0 ? 'positive' : 'negative'}">${pos.pnl.toFixed(2)}</td>
                             <td class="${pos.pnl_percentage >= 0 ? 'positive' : 'negative'}">${pos.pnl_percentage.toFixed(2)}%</td>
+                            <td title="${pos.duration_hours} hours">${pos.duration || 'N/A'}</td>
                             <td>${pos.strategy}</td>
                             <td><button onclick="closePosition('${pos.symbol}')" style="padding:6px 10px; background:#ff9800; color:#fff; border:none; border-radius:6px; cursor:pointer;">Close</button></td>
                         </tr>

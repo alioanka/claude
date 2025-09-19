@@ -50,6 +50,19 @@ class PortfolioPosition:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
+        # Calculate position duration
+        duration_seconds = (datetime.utcnow() - self.timestamp).total_seconds()
+        duration_hours = duration_seconds / 3600
+        duration_days = duration_hours / 24
+        
+        # Format duration string
+        if duration_days >= 1:
+            duration_str = f"{int(duration_days)}d {int(duration_hours % 24)}h"
+        elif duration_hours >= 1:
+            duration_str = f"{int(duration_hours)}h {int((duration_seconds % 3600) / 60)}m"
+        else:
+            duration_str = f"{int(duration_seconds / 60)}m"
+        
         return {
             'symbol': self.symbol,
             'side': self.side,
@@ -61,7 +74,9 @@ class PortfolioPosition:
             'unrealized_pnl': self.unrealized_pnl,
             'unrealized_pnl_pct': self.unrealized_pnl_pct,
             'timestamp': self.timestamp.isoformat(),
-            'strategy': self.strategy
+            'strategy': self.strategy,
+            'duration': duration_str,
+            'duration_hours': round(duration_hours, 2)
         }
 
 @dataclass
