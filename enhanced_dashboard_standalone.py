@@ -244,12 +244,13 @@ async def get_positions():
             conn = await get_db_connection()
             if conn:
                 try:
+                    # Start a new transaction
+                    conn.rollback()
                     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                     
-                    # Get open positions
+                    # Get open positions (check if status column exists)
                     cursor.execute("""
                         SELECT * FROM positions 
-                        WHERE status = 'open' 
                         ORDER BY created_at DESC
                     """)
                     positions = cursor.fetchall()
@@ -291,6 +292,7 @@ async def get_positions():
                     cursor.close()
                 except Exception as e:
                     logger.warning(f"Error getting positions: {e}")
+                    conn.rollback()
         
         return {"positions": positions_data}
         
@@ -309,6 +311,8 @@ async def get_trades(limit: int = 100, strategy: str = None):
             conn = await get_db_connection()
             if conn:
                 try:
+                    # Start a new transaction
+                    conn.rollback()
                     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                     
                     # Get trades
@@ -341,6 +345,7 @@ async def get_trades(limit: int = 100, strategy: str = None):
                     cursor.close()
                 except Exception as e:
                     logger.warning(f"Error getting trades: {e}")
+                    conn.rollback()
         
         return {"trades": trades_data}
         
@@ -379,9 +384,11 @@ async def get_performance():
             conn = await get_db_connection()
             if conn:
                 try:
+                    # Start a new transaction
+                    conn.rollback()
                     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                     
-                    # Get performance metrics
+                    # Get performance metrics (remove status filter)
                     cursor.execute("""
                         SELECT 
                             COUNT(*) as total_trades,
@@ -390,8 +397,7 @@ async def get_performance():
                             AVG(CASE WHEN pnl > 0 THEN pnl END) as avg_win,
                             AVG(CASE WHEN pnl < 0 THEN pnl END) as avg_loss,
                             SUM(pnl) as total_pnl
-                        FROM trades 
-                        WHERE status = 'closed'
+                        FROM trades
                     """)
                     
                     perf_row = cursor.fetchone()
@@ -413,6 +419,7 @@ async def get_performance():
                     cursor.close()
                 except Exception as e:
                     logger.warning(f"Error getting performance data: {e}")
+                    conn.rollback()
         
         return default_performance
         
@@ -450,9 +457,11 @@ async def get_strategy_performance():
             conn = await get_db_connection()
             if conn:
                 try:
+                    # Start a new transaction
+                    conn.rollback()
                     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                     
-                    # Get strategy performance
+                    # Get strategy performance (remove status filter)
                     cursor.execute("""
                         SELECT 
                             strategy,
@@ -463,7 +472,6 @@ async def get_strategy_performance():
                             MAX(pnl) as max_win,
                             MIN(pnl) as max_loss
                         FROM trades 
-                        WHERE status = 'closed'
                         GROUP BY strategy
                         ORDER BY total_pnl DESC
                     """)
@@ -488,6 +496,7 @@ async def get_strategy_performance():
                     cursor.close()
                 except Exception as e:
                     logger.warning(f"Error getting strategy performance: {e}")
+                    conn.rollback()
         
         return {"strategy_performance": strategy_performance}
         
@@ -514,17 +523,18 @@ async def get_risk_metrics():
             conn = await get_db_connection()
             if conn:
                 try:
+                    # Start a new transaction
+                    conn.rollback()
                     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                     
-                    # Get risk metrics
+                    # Get risk metrics (remove status filter)
                     cursor.execute("""
                         SELECT 
                             MAX(pnl) as max_pnl,
                             MIN(pnl) as min_pnl,
                             AVG(pnl) as avg_pnl,
                             STDDEV(pnl) as std_pnl
-                        FROM trades 
-                        WHERE status = 'closed'
+                        FROM trades
                     """)
                     
                     risk_row = cursor.fetchone()
@@ -543,6 +553,7 @@ async def get_risk_metrics():
                     cursor.close()
                 except Exception as e:
                     logger.warning(f"Error getting risk metrics: {e}")
+                    conn.rollback()
         
         return risk_metrics
         
@@ -639,6 +650,13 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         await manager.connect(websocket)
         logger.info("WebSocket connection established")
+        
+        # Send initial connection message
+        await websocket.send_text(json.dumps({
+            "type": "connection_established",
+            "message": "Connected to ClaudeBot Enhanced Dashboard",
+            "timestamp": datetime.utcnow().isoformat()
+        }))
         
         while True:
             try:
