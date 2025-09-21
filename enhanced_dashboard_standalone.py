@@ -153,6 +153,67 @@ async def test_endpoint():
         "database_available": HAS_PSYCOPG2
     }
 
+@app.get("/api/debug/schema")
+async def debug_schema():
+    """Debug endpoint to check database schema"""
+    if not HAS_PSYCOPG2:
+        return {"error": "Database not available"}
+    
+    try:
+        conn = await get_db_connection()
+        if not conn:
+            return {"error": "Cannot connect to database"}
+        
+        cursor = conn.cursor()
+        
+        # Check positions table schema
+        cursor.execute("""
+            SELECT column_name, data_type 
+            FROM information_schema.columns 
+            WHERE table_name = 'positions' 
+            ORDER BY ordinal_position
+        """)
+        positions_schema = cursor.fetchall()
+        
+        # Check trades table schema
+        cursor.execute("""
+            SELECT column_name, data_type 
+            FROM information_schema.columns 
+            WHERE table_name = 'trades' 
+            ORDER BY ordinal_position
+        """)
+        trades_schema = cursor.fetchall()
+        
+        # Get sample data from positions
+        cursor.execute("SELECT * FROM positions LIMIT 3")
+        sample_positions = cursor.fetchall()
+        
+        # Get column names from positions table
+        cursor.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'positions' 
+            ORDER BY ordinal_position
+        """)
+        positions_columns = [row[0] for row in cursor.fetchall()]
+        
+        # Get sample data from trades
+        cursor.execute("SELECT * FROM trades LIMIT 3")
+        sample_trades = cursor.fetchall()
+        
+        cursor.close()
+        
+        return {
+            "positions_schema": positions_schema,
+            "trades_schema": trades_schema,
+            "positions_columns": positions_columns,
+            "sample_positions": sample_positions,
+            "sample_trades": sample_trades
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
 # Account & Portfolio APIs
 @app.get("/api/account")
 async def get_account():
@@ -255,9 +316,14 @@ async def get_positions():
                     """)
                     positions = cursor.fetchall()
                     
+                    logger.info(f"Found {len(positions)} positions in database")
+                    if positions:
+                        logger.info(f"Sample position columns: {list(positions[0].keys()) if positions else 'No positions'}")
+                        logger.info(f"Sample position data: {positions[0] if positions else 'No positions'}")
+                    
                     for pos in positions:
                         # Calculate duration
-                        created_at = pos.get('created_at')
+                        created_at = pos.get('created_at') or pos.get('timestamp')
                         if created_at:
                             if hasattr(created_at, 'isoformat'):
                                 duration_seconds = (datetime.utcnow() - created_at).total_seconds()
@@ -275,14 +341,34 @@ async def get_positions():
                             duration_str = "N/A"
                             duration_hours = 0
                         
+                        # Try different possible column names for size
+                        size_value = pos.get('size') or pos.get('quantity') or pos.get('amount') or 0.0
+                        size_value = float(size_value) if size_value is not None else 0.0
+                        
+                        # Try different possible column names for entry price
+                        entry_price = pos.get('entry_price') or pos.get('price') or pos.get('open_price') or 0.0
+                        entry_price = float(entry_price) if entry_price is not None else 0.0
+                        
+                        # Try different possible column names for current price
+                        current_price = pos.get('current_price') or pos.get('market_price') or pos.get('close_price') or entry_price
+                        current_price = float(current_price) if current_price is not None else entry_price
+                        
+                        # Try different possible column names for PnL
+                        pnl_value = pos.get('unrealized_pnl') or pos.get('pnl') or pos.get('profit_loss') or 0.0
+                        pnl_value = float(pnl_value) if pnl_value is not None else 0.0
+                        
+                        # Try different possible column names for PnL percentage
+                        pnl_percentage = pos.get('unrealized_pnl_percentage') or pos.get('pnl_percentage') or pos.get('profit_loss_percentage') or 0.0
+                        pnl_percentage = float(pnl_percentage) if pnl_percentage is not None else 0.0
+                        
                         positions_data.append({
                             "symbol": pos.get('symbol', 'N/A'),
                             "side": pos.get('side', 'N/A'),
-                            "size": float(pos.get('size', 0.0)),
-                            "entry_price": float(pos.get('entry_price', 0.0)),
-                            "current_price": float(pos.get('current_price', pos.get('entry_price', 0.0))),
-                            "pnl": float(pos.get('unrealized_pnl', 0.0)),
-                            "pnl_percentage": float(pos.get('unrealized_pnl_percentage', 0.0)),
+                            "size": size_value,
+                            "entry_price": entry_price,
+                            "current_price": current_price,
+                            "pnl": pnl_value,
+                            "pnl_percentage": pnl_percentage,
                             "duration": duration_str,
                             "duration_hours": round(duration_hours, 2),
                             "strategy": pos.get('strategy', 'N/A'),
@@ -292,6 +378,7 @@ async def get_positions():
                     cursor.close()
                 except Exception as e:
                     logger.warning(f"Error getting positions: {e}")
+                    logger.warning(f"Position data sample: {positions[:2] if positions else 'No positions found'}")
                     conn.rollback()
         
         return {"positions": positions_data}
@@ -315,30 +402,59 @@ async def get_trades(limit: int = 100, strategy: str = None):
                     conn.rollback()
                     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                     
-                    # Get trades
-                    query = "SELECT * FROM trades ORDER BY opened_at DESC LIMIT %s"
+                    # Get trades (use correct column names)
+                    query = "SELECT * FROM trades ORDER BY created_at DESC LIMIT %s"
                     params = [limit]
                     
                     if strategy:
-                        query = "SELECT * FROM trades WHERE strategy = %s ORDER BY opened_at DESC LIMIT %s"
+                        query = "SELECT * FROM trades WHERE strategy = %s ORDER BY created_at DESC LIMIT %s"
                         params = [strategy, limit]
                     
                     cursor.execute(query, params)
                     trades = cursor.fetchall()
                     
+                    logger.info(f"Found {len(trades)} trades in database")
+                    if trades:
+                        logger.info(f"Sample trade columns: {list(trades[0].keys()) if trades else 'No trades'}")
+                        logger.info(f"Sample trade data: {trades[0] if trades else 'No trades'}")
+                    
                     for trade in trades:
+                        # Try different possible column names for size
+                        size_value = trade.get('size') or trade.get('quantity') or trade.get('amount') or 0.0
+                        size_value = float(size_value) if size_value is not None else 0.0
+                        
+                        # Try different possible column names for entry price
+                        entry_price = trade.get('entry_price') or trade.get('open_price') or trade.get('price') or 0.0
+                        entry_price = float(entry_price) if entry_price is not None else 0.0
+                        
+                        # Try different possible column names for exit price
+                        exit_price = trade.get('exit_price') or trade.get('close_price') or trade.get('close_price')
+                        exit_price = float(exit_price) if exit_price is not None else None
+                        
+                        # Try different possible column names for PnL
+                        pnl_value = trade.get('pnl') or trade.get('profit_loss') or trade.get('unrealized_pnl') or 0.0
+                        pnl_value = float(pnl_value) if pnl_value is not None else 0.0
+                        
+                        # Try different possible column names for PnL percentage
+                        pnl_percentage = trade.get('pnl_percentage') or trade.get('profit_loss_percentage') or trade.get('unrealized_pnl_percentage') or 0.0
+                        pnl_percentage = float(pnl_percentage) if pnl_percentage is not None else 0.0
+                        
+                        # Try different possible column names for timestamps
+                        opened_at = trade.get('created_at') or trade.get('opened_at') or trade.get('timestamp')
+                        closed_at = trade.get('closed_at') or trade.get('exit_timestamp')
+                        
                         trades_data.append({
                             "id": trade.get('id'),
                             "symbol": trade.get('symbol', 'N/A'),
                             "side": trade.get('side', 'N/A'),
-                            "size": float(trade.get('size', 0.0)),
-                            "entry_price": float(trade.get('entry_price', 0.0)),
-                            "exit_price": float(trade.get('exit_price', 0.0)) if trade.get('exit_price') else None,
-                            "pnl": float(trade.get('pnl', 0.0)),
-                            "pnl_percentage": float(trade.get('pnl_percentage', 0.0)),
+                            "size": size_value,
+                            "entry_price": entry_price,
+                            "exit_price": exit_price,
+                            "pnl": pnl_value,
+                            "pnl_percentage": pnl_percentage,
                             "strategy": trade.get('strategy', 'N/A'),
-                            "opened_at": trade.get('opened_at').isoformat() if trade.get('opened_at') and hasattr(trade.get('opened_at'), 'isoformat') else None,
-                            "closed_at": trade.get('closed_at').isoformat() if trade.get('closed_at') and hasattr(trade.get('closed_at'), 'isoformat') else None,
+                            "opened_at": opened_at.isoformat() if opened_at and hasattr(opened_at, 'isoformat') else None,
+                            "closed_at": closed_at.isoformat() if closed_at and hasattr(closed_at, 'isoformat') else None,
                             "status": trade.get('status', 'N/A')
                         })
                     
@@ -388,15 +504,15 @@ async def get_performance():
                     conn.rollback()
                     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                     
-                    # Get performance metrics (remove status filter)
+                    # Get performance metrics (use correct column names)
                     cursor.execute("""
                         SELECT 
                             COUNT(*) as total_trades,
-                            COUNT(CASE WHEN pnl > 0 THEN 1 END) as winning_trades,
-                            COUNT(CASE WHEN pnl < 0 THEN 1 END) as losing_trades,
-                            AVG(CASE WHEN pnl > 0 THEN pnl END) as avg_win,
-                            AVG(CASE WHEN pnl < 0 THEN pnl END) as avg_loss,
-                            SUM(pnl) as total_pnl
+                            COUNT(CASE WHEN pnl_percentage > 0 THEN 1 END) as winning_trades,
+                            COUNT(CASE WHEN pnl_percentage < 0 THEN 1 END) as losing_trades,
+                            AVG(CASE WHEN pnl_percentage > 0 THEN pnl_percentage END) as avg_win,
+                            AVG(CASE WHEN pnl_percentage < 0 THEN pnl_percentage END) as avg_loss,
+                            SUM(pnl_percentage) as total_pnl
                         FROM trades
                     """)
                     
@@ -461,16 +577,16 @@ async def get_strategy_performance():
                     conn.rollback()
                     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                     
-                    # Get strategy performance (remove status filter)
+                    # Get strategy performance (use correct column names)
                     cursor.execute("""
                         SELECT 
                             strategy,
                             COUNT(*) as total_trades,
-                            COUNT(CASE WHEN pnl > 0 THEN 1 END) as winning_trades,
-                            SUM(pnl) as total_pnl,
-                            AVG(pnl) as avg_pnl,
-                            MAX(pnl) as max_win,
-                            MIN(pnl) as max_loss
+                            COUNT(CASE WHEN pnl_percentage > 0 THEN 1 END) as winning_trades,
+                            SUM(pnl_percentage) as total_pnl,
+                            AVG(pnl_percentage) as avg_pnl,
+                            MAX(pnl_percentage) as max_win,
+                            MIN(pnl_percentage) as max_loss
                         FROM trades 
                         GROUP BY strategy
                         ORDER BY total_pnl DESC
@@ -527,13 +643,13 @@ async def get_risk_metrics():
                     conn.rollback()
                     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                     
-                    # Get risk metrics (remove status filter)
+                    # Get risk metrics (use correct column names)
                     cursor.execute("""
                         SELECT 
-                            MAX(pnl) as max_pnl,
-                            MIN(pnl) as min_pnl,
-                            AVG(pnl) as avg_pnl,
-                            STDDEV(pnl) as std_pnl
+                            MAX(pnl_percentage) as max_pnl,
+                            MIN(pnl_percentage) as min_pnl,
+                            AVG(pnl_percentage) as avg_pnl,
+                            STDDEV(pnl_percentage) as std_pnl
                         FROM trades
                     """)
                     
@@ -579,7 +695,13 @@ async def get_market_data():
             "eth_price": 3000.0,
             "market_cap": 2000000000000.0,
             "fear_greed_index": 50,
-            "total_volume": 100000000000.0
+            "total_volume": 100000000000.0,
+            "btc_change_24h": 2.5,
+            "eth_change_24h": -1.2,
+            "btc_high_24h": 52000.0,
+            "btc_low_24h": 48000.0,
+            "eth_high_24h": 3100.0,
+            "eth_low_24h": 2900.0
         }
         
         return {"market_data": market_data}
