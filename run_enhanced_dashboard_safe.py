@@ -18,7 +18,7 @@ os.environ['DASHBOARD_HOST'] = '0.0.0.0'
 
 # Import and run the enhanced dashboard
 try:
-    from enhanced_dashboard_simple import app
+    from enhanced_dashboard_minimal import app
     import uvicorn
     
     print("🚀 Starting Enhanced Dashboard on port 8001...")
