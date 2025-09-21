@@ -309,9 +309,10 @@ async def get_positions():
                     conn.rollback()
                     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                     
-                    # Get open positions (check if status column exists)
+                    # Get only open positions (is_open = true)
                     cursor.execute("""
                         SELECT * FROM positions 
+                        WHERE is_open = true
                         ORDER BY created_at DESC
                     """)
                     positions = cursor.fetchall()
@@ -402,12 +403,46 @@ async def get_trades(limit: int = 100, strategy: str = None):
                     conn.rollback()
                     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                     
-                    # Get trades (use correct column names)
-                    query = "SELECT * FROM trades ORDER BY created_at DESC LIMIT %s"
+                    # Get closed positions as "trades" (like existing dashboard)
+                    query = """
+                        SELECT 
+                            id,
+                            symbol,
+                            side,
+                            size,
+                            entry_price as price,
+                            pnl,
+                            pnl_percentage,
+                            created_at as timestamp,
+                            strategy,
+                            closed_at,
+                            (size * entry_price) as total_value
+                        FROM positions 
+                        WHERE is_open = false 
+                        ORDER BY closed_at DESC 
+                        LIMIT %s
+                    """
                     params = [limit]
                     
                     if strategy:
-                        query = "SELECT * FROM trades WHERE strategy = %s ORDER BY created_at DESC LIMIT %s"
+                        query = """
+                            SELECT 
+                                id,
+                                symbol,
+                                side,
+                                size,
+                                entry_price as price,
+                                pnl,
+                                pnl_percentage,
+                                created_at as timestamp,
+                                strategy,
+                                closed_at,
+                                (size * entry_price) as total_value
+                            FROM positions 
+                            WHERE is_open = false AND strategy = %s
+                            ORDER BY closed_at DESC 
+                            LIMIT %s
+                        """
                         params = [strategy, limit]
                     
                     cursor.execute(query, params)
@@ -419,29 +454,29 @@ async def get_trades(limit: int = 100, strategy: str = None):
                         logger.info(f"Sample trade data: {trades[0] if trades else 'No trades'}")
                     
                     for trade in trades:
-                        # Try different possible column names for size
-                        size_value = trade.get('size') or trade.get('quantity') or trade.get('amount') or 0.0
-                        size_value = float(size_value) if size_value is not None else 0.0
+                        # Map closed positions data (already selected with correct column names)
+                        size_value = float(trade.get('size', 0.0))
+                        entry_price = float(trade.get('price', 0.0))  # entry_price aliased as price
+                        exit_price = None  # Closed positions don't have exit price in this query
+                        pnl_value = float(trade.get('pnl', 0.0))
+                        pnl_percentage = float(trade.get('pnl_percentage', 0.0))
                         
-                        # Try different possible column names for entry price
-                        entry_price = trade.get('entry_price') or trade.get('open_price') or trade.get('price') or 0.0
-                        entry_price = float(entry_price) if entry_price is not None else 0.0
+                        # Calculate duration from created_at to closed_at
+                        opened_at = trade.get('timestamp')  # created_at aliased as timestamp
+                        closed_at = trade.get('closed_at')
                         
-                        # Try different possible column names for exit price
-                        exit_price = trade.get('exit_price') or trade.get('close_price') or trade.get('close_price')
-                        exit_price = float(exit_price) if exit_price is not None else None
-                        
-                        # Try different possible column names for PnL
-                        pnl_value = trade.get('pnl') or trade.get('profit_loss') or trade.get('unrealized_pnl') or 0.0
-                        pnl_value = float(pnl_value) if pnl_value is not None else 0.0
-                        
-                        # Try different possible column names for PnL percentage
-                        pnl_percentage = trade.get('pnl_percentage') or trade.get('profit_loss_percentage') or trade.get('unrealized_pnl_percentage') or 0.0
-                        pnl_percentage = float(pnl_percentage) if pnl_percentage is not None else 0.0
-                        
-                        # Try different possible column names for timestamps
-                        opened_at = trade.get('created_at') or trade.get('opened_at') or trade.get('timestamp')
-                        closed_at = trade.get('closed_at') or trade.get('exit_timestamp')
+                        # Calculate duration
+                        duration_str = "N/A"
+                        if opened_at and closed_at:
+                            if hasattr(opened_at, 'isoformat') and hasattr(closed_at, 'isoformat'):
+                                duration_seconds = (closed_at - opened_at).total_seconds()
+                                duration_hours = duration_seconds / 3600
+                                if duration_hours >= 24:
+                                    duration_str = f"{int(duration_hours // 24)}d {int(duration_hours % 24)}h"
+                                elif duration_hours >= 1:
+                                    duration_str = f"{int(duration_hours)}h {int((duration_seconds % 3600) / 60)}m"
+                                else:
+                                    duration_str = f"{int(duration_seconds / 60)}m"
                         
                         trades_data.append({
                             "id": trade.get('id'),
@@ -455,7 +490,8 @@ async def get_trades(limit: int = 100, strategy: str = None):
                             "strategy": trade.get('strategy', 'N/A'),
                             "opened_at": opened_at.isoformat() if opened_at and hasattr(opened_at, 'isoformat') else None,
                             "closed_at": closed_at.isoformat() if closed_at and hasattr(closed_at, 'isoformat') else None,
-                            "status": trade.get('status', 'N/A')
+                            "duration": duration_str,
+                            "status": "closed"  # All these are closed positions
                         })
                     
                     cursor.close()
@@ -504,7 +540,7 @@ async def get_performance():
                     conn.rollback()
                     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                     
-                    # Get performance metrics (use correct column names)
+                    # Get performance metrics from closed positions (trades table doesn't have pnl_percentage)
                     cursor.execute("""
                         SELECT 
                             COUNT(*) as total_trades,
@@ -513,7 +549,8 @@ async def get_performance():
                             AVG(CASE WHEN pnl_percentage > 0 THEN pnl_percentage END) as avg_win,
                             AVG(CASE WHEN pnl_percentage < 0 THEN pnl_percentage END) as avg_loss,
                             SUM(pnl_percentage) as total_pnl
-                        FROM trades
+                        FROM positions 
+                        WHERE is_open = false
                     """)
                     
                     perf_row = cursor.fetchone()
@@ -577,7 +614,7 @@ async def get_strategy_performance():
                     conn.rollback()
                     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                     
-                    # Get strategy performance (use correct column names)
+                    # Get strategy performance from closed positions
                     cursor.execute("""
                         SELECT 
                             strategy,
@@ -587,7 +624,8 @@ async def get_strategy_performance():
                             AVG(pnl_percentage) as avg_pnl,
                             MAX(pnl_percentage) as max_win,
                             MIN(pnl_percentage) as max_loss
-                        FROM trades 
+                        FROM positions 
+                        WHERE is_open = false
                         GROUP BY strategy
                         ORDER BY total_pnl DESC
                     """)
@@ -643,14 +681,15 @@ async def get_risk_metrics():
                     conn.rollback()
                     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                     
-                    # Get risk metrics (use correct column names)
+                    # Get risk metrics from closed positions
                     cursor.execute("""
                         SELECT 
                             MAX(pnl_percentage) as max_pnl,
                             MIN(pnl_percentage) as min_pnl,
                             AVG(pnl_percentage) as avg_pnl,
                             STDDEV(pnl_percentage) as std_pnl
-                        FROM trades
+                        FROM positions 
+                        WHERE is_open = false
                     """)
                     
                     risk_row = cursor.fetchone()
