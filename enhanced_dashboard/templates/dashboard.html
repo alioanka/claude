@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClaudeBot Enhanced Dashboard</title>
+    
+    <!-- External Libraries -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/animate.css@4.1.1/animate.min.css" rel="stylesheet">
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    
+    <!-- ApexCharts for advanced charts -->
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.44.0/dist/apexcharts.min.js"></script>
+    
+    <!-- Custom CSS -->
+    <link href="/static/css/dashboard.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-robot me-2"></i>
+                <span class="fw-bold">ClaudeBot</span>
+                <span class="badge bg-success ms-2">Enhanced</span>
+            </a>
+            
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#overview" onclick="showSection('overview')">
+                            <i class="fas fa-tachometer-alt me-1"></i>Overview
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#positions" onclick="showSection('positions')">
+                            <i class="fas fa-chart-line me-1"></i>Positions
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#trades" onclick="showSection('trades')">
+                            <i class="fas fa-exchange-alt me-1"></i>Trades
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#analytics" onclick="showSection('analytics')">
+                            <i class="fas fa-chart-bar me-1"></i>Analytics
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#risk" onclick="showSection('risk')">
+                            <i class="fas fa-shield-alt me-1"></i>Risk Management
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#market" onclick="showSection('market')">
+                            <i class="fas fa-globe me-1"></i>Market Data
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#settings" onclick="showSection('settings')">
+                            <i class="fas fa-cog me-1"></i>Settings
+                        </a>
+                    </li>
+                </ul>
+                
+                <div class="navbar-nav">
+                    <div class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="fas fa-user-circle me-1"></i>Admin
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#" onclick="refreshAllData()">
+                                <i class="fas fa-sync-alt me-2"></i>Refresh All
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" onclick="exportData()">
+                                <i class="fas fa-download me-2"></i>Export Data
+                            </a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#" onclick="showSystemInfo()">
+                                <i class="fas fa-info-circle me-2"></i>System Info
+                            </a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Connection Status -->
+    <div class="connection-status" id="connectionStatus">
+        <div class="status-indicator">
+            <i class="fas fa-circle text-warning"></i>
+            <span>Connecting...</span>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Overview Section -->
+        <div id="overview-section" class="content-section">
+            <!-- Key Metrics Cards -->
+            <div class="row mb-4">
+                <div class="col-xl-3 col-md-6 mb-4">
+                    <div class="card metric-card border-left-primary">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                                        Total Balance
+                                    </div>
+                                    <div class="h5 mb-0 font-weight-bold text-gray-800" id="totalBalance">
+                                        $0.00
+                                    </div>
+                                </div>
+                                <div class="col-auto">
+                                    <i class="fas fa-wallet fa-2x text-gray-300"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-xl-3 col-md-6 mb-4">
+                    <div class="card metric-card border-left-success">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                                        Total P&L
+                                    </div>
+                                    <div class="h5 mb-0 font-weight-bold text-gray-800" id="totalPnL">
+                                        $0.00
+                                    </div>
+                                </div>
+                                <div class="col-auto">
+                                    <i class="fas fa-chart-line fa-2x text-gray-300"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-xl-3 col-md-6 mb-4">
+                    <div class="card metric-card border-left-info">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                                        Active Positions
+                                    </div>
+                                    <div class="h5 mb-0 font-weight-bold text-gray-800" id="activePositions">
+                                        0
+                                    </div>
+                                </div>
+                                <div class="col-auto">
+                                    <i class="fas fa-chart-pie fa-2x text-gray-300"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-xl-3 col-md-6 mb-4">
+                    <div class="card metric-card border-left-warning">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                                        Win Rate
+                                    </div>
+                                    <div class="h5 mb-0 font-weight-bold text-gray-800" id="winRate">
+                                        0%
+                                    </div>
+                                </div>
+                                <div class="col-auto">
+                                    <i class="fas fa-trophy fa-2x text-gray-300"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Row -->
+            <div class="row mb-4">
+                <div class="col-xl-8 col-lg-7">
+                    <div class="card shadow mb-4">
+                        <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                            <h6 class="m-0 font-weight-bold text-primary">Portfolio Performance</h6>
+                            <div class="dropdown no-arrow">
+                                <a class="dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                    <i class="fas fa-ellipsis-v fa-sm fa-fw text-gray-400"></i>
+                                </a>
+                                <div class="dropdown-menu dropdown-menu-right shadow">
+                                    <a class="dropdown-item" href="#" onclick="updatePortfolioChart('1d')">Last 24 Hours</a>
+                                    <a class="dropdown-item" href="#" onclick="updatePortfolioChart('7d')">Last 7 Days</a>
+                                    <a class="dropdown-item" href="#" onclick="updatePortfolioChart('30d')">Last 30 Days</a>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="chart-area">
+                                <canvas id="portfolioChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-xl-4 col-lg-5">
+                    <div class="card shadow mb-4">
+                        <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                            <h6 class="m-0 font-weight-bold text-primary">Strategy Distribution</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="chart-pie pt-4 pb-2">
+                                <canvas id="strategyChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Strategy Performance Table -->
+            <div class="row">
+                <div class="col-12">
+                    <div class="card shadow mb-4">
+                        <div class="card-header py-3">
+                            <h6 class="m-0 font-weight-bold text-primary">Strategy Performance</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-bordered" id="strategyTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Strategy</th>
+                                            <th>Trades</th>
+                                            <th>Win Rate</th>
+                                            <th>Total P&L</th>
+                                            <th>Avg P&L</th>
+                                            <th>Sharpe Ratio</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="strategyTableBody">
+                                        <!-- Data will be loaded here -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Positions Section -->
+        <div id="positions-section" class="content-section" style="display: none;">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h4 class="text-gray-800">Current Positions</h4>
+                <div>
+                    <button class="btn btn-primary me-2" onclick="refreshPositions()">
+                        <i class="fas fa-sync-alt me-1"></i>Refresh
+                    </button>
+                    <button class="btn btn-danger" onclick="closeAllPositions()">
+                        <i class="fas fa-times me-1"></i>Close All
+                    </button>
+                </div>
+            </div>
+
+            <div class="card shadow mb-4">
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered" id="positionsTable">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Side</th>
+                                    <th>Size</th>
+                                    <th>Entry Price</th>
+                                    <th>Current Price</th>
+                                    <th>P&L</th>
+                                    <th>P&L %</th>
+                                    <th>Duration</th>
+                                    <th>Strategy</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="positionsTableBody">
+                                <!-- Data will be loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Trades Section -->
+        <div id="trades-section" class="content-section" style="display: none;">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h4 class="text-gray-800">Recent Trades</h4>
+                <div>
+                    <select class="form-select me-2" id="strategyFilter" onchange="filterTrades()">
+                        <option value="">All Strategies</option>
+                        <option value="momentum_strategy">Momentum</option>
+                        <option value="mean_reversion">Mean Reversion</option>
+                        <option value="arbitrage_strategy">Arbitrage</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="refreshTrades()">
+                        <i class="fas fa-sync-alt me-1"></i>Refresh
+                    </button>
+                </div>
+            </div>
+
+            <div class="card shadow mb-4">
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered" id="tradesTable">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Side</th>
+                                    <th>Size</th>
+                                    <th>Entry Price</th>
+                                    <th>Exit Price</th>
+                                    <th>P&L</th>
+                                    <th>P&L %</th>
+                                    <th>Duration</th>
+                                    <th>Opened</th>
+                                    <th>Closed</th>
+                                    <th>Strategy</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tradesTableBody">
+                                <!-- Data will be loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Analytics Section -->
+        <div id="analytics-section" class="content-section" style="display: none;">
+            <div class="row mb-4">
+                <div class="col-12">
+                    <h4 class="text-gray-800">Advanced Analytics</h4>
+                </div>
+            </div>
+
+            <div class="row mb-4">
+                <div class="col-xl-6 col-lg-6">
+                    <div class="card shadow mb-4">
+                        <div class="card-header py-3">
+                            <h6 class="m-0 font-weight-bold text-primary">P&L Distribution</h6>
+                        </div>
+                        <div class="card-body">
+                            <div id="pnlDistributionChart"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-xl-6 col-lg-6">
+                    <div class="card shadow mb-4">
+                        <div class="card-header py-3">
+                            <h6 class="m-0 font-weight-bold text-primary">Drawdown Analysis</h6>
+                        </div>
+                        <div class="card-body">
+                            <div id="drawdownChart"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card shadow mb-4">
+                        <div class="card-header py-3">
+                            <h6 class="m-0 font-weight-bold text-primary">Performance Metrics</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="metric-box">
+                                        <h6>Sharpe Ratio</h6>
+                                        <h4 id="sharpeRatio">0.00</h4>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="metric-box">
+                                        <h6>Max Drawdown</h6>
+                                        <h4 id="maxDrawdown">0.00%</h4>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="metric-box">
+                                        <h6>Volatility</h6>
+                                        <h4 id="volatility">0.00%</h4>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="metric-box">
+                                        <h6>Beta</h6>
+                                        <h4 id="beta">0.00</h4>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Risk Management Section -->
+        <div id="risk-section" class="content-section" style="display: none;">
+            <div class="row mb-4">
+                <div class="col-12">
+                    <h4 class="text-gray-800">Risk Management</h4>
+                </div>
+            </div>
+
+            <div class="row mb-4">
+                <div class="col-xl-4 col-lg-6">
+                    <div class="card shadow mb-4">
+                        <div class="card-header py-3">
+                            <h6 class="m-0 font-weight-bold text-primary">Value at Risk</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="risk-metric">
+                                <h5>VaR 95%</h5>
+                                <h3 class="text-danger" id="var95">$0.00</h3>
+                            </div>
+                            <div class="risk-metric">
+                                <h5>VaR 99%</h5>
+                                <h3 class="text-danger" id="var99">$0.00</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-xl-4 col-lg-6">
+                    <div class="card shadow mb-4">
+                        <div class="card-header py-3">
+                            <h6 class="m-0 font-weight-bold text-primary">Position Limits</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="risk-metric">
+                                <h5>Max Positions</h5>
+                                <h3 id="maxPositions">50</h3>
+                            </div>
+                            <div class="risk-metric">
+                                <h5>Current Positions</h5>
+                                <h3 id="currentPositions">0</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-xl-4 col-lg-6">
+                    <div class="card shadow mb-4">
+                        <div class="card-header py-3">
+                            <h6 class="m-0 font-weight-bold text-primary">Correlation Risk</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="risk-metric">
+                                <h5>Max Correlation</h5>
+                                <h3 id="maxCorrelation">0.70</h3>
+                            </div>
+                            <div class="risk-metric">
+                                <h5>Current Correlation</h5>
+                                <h3 id="currentCorrelation">0.00</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Market Data Section -->
+        <div id="market-section" class="content-section" style="display: none;">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h4 class="text-gray-800">Market Data</h4>
+                <button class="btn btn-primary" onclick="refreshMarketData()">
+                    <i class="fas fa-sync-alt me-1"></i>Refresh
+                </button>
+            </div>
+
+            <div class="card shadow mb-4">
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered" id="marketTable">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Price</th>
+                                    <th>Change 24h</th>
+                                    <th>Volume 24h</th>
+                                    <th>High 24h</th>
+                                    <th>Low 24h</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="marketTableBody">
+                                <!-- Data will be loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Section -->
+        <div id="settings-section" class="content-section" style="display: none;">
+            <div class="row mb-4">
+                <div class="col-12">
+                    <h4 class="text-gray-800">Settings & Configuration</h4>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-xl-6">
+                    <div class="card shadow mb-4">
+                        <div class="card-header py-3">
+                            <h6 class="m-0 font-weight-bold text-primary">Trading Configuration</h6>
+                        </div>
+                        <div class="card-body">
+                            <form id="tradingConfigForm">
+                                <div class="mb-3">
+                                    <label class="form-label">Max Positions</label>
+                                    <input type="number" class="form-control" id="maxPositionsInput" min="1" max="100">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Stop Loss %</label>
+                                    <input type="number" class="form-control" id="stopLossInput" step="0.01" min="0" max="1">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Take Profit %</label>
+                                    <input type="number" class="form-control" id="takeProfitInput" step="0.01" min="0" max="1">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Max Daily Loss %</label>
+                                    <input type="number" class="form-control" id="maxDailyLossInput" step="0.01" min="0" max="1">
+                                </div>
+                                <button type="button" class="btn btn-primary" onclick="saveTradingConfig()">
+                                    <i class="fas fa-save me-1"></i>Save Configuration
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-xl-6">
+                    <div class="card shadow mb-4">
+                        <div class="card-header py-3">
+                            <h6 class="m-0 font-weight-bold text-primary">Strategy Configuration</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="strategy-config">
+                                <div class="mb-3">
+                                    <label class="form-label">Momentum Strategy</label>
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <span>Allocation: <span id="momentumAllocation">60%</span></span>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="momentumEnabled" checked>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Mean Reversion</label>
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <span>Allocation: <span id="meanReversionAllocation">30%</span></span>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="meanReversionEnabled" checked>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Arbitrage Strategy</label>
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <span>Allocation: <span id="arbitrageAllocation">10%</span></span>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="arbitrageEnabled" checked>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="toast" class="toast" role="alert">
+            <div class="toast-header">
+                <i class="fas fa-info-circle text-primary me-2"></i>
+                <strong class="me-auto">ClaudeBot</strong>
+                <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+            </div>
+            <div class="toast-body" id="toastBody">
+                <!-- Toast message will be inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

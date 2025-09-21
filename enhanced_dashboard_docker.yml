@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  enhanced-dashboard:
+    build:
+      context: .
+      dockerfile: enhanced_dashboard.Dockerfile
+    container_name: claudebot-enhanced-dashboard
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://trader:secure_password@postgres:5432/trading_bot
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DASHBOARD_PORT=8001
+      - DASHBOARD_HOST=0.0.0.0
+      - ENVIRONMENT=production
+    volumes:
+      - ./enhanced_dashboard:/app/enhanced_dashboard
+      - ./logs:/app/logs
+      - ./storage:/app/storage
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - claudebot-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: claudebot-postgres-enhanced
+    environment:
+      - POSTGRES_DB=trading_bot
+      - POSTGRES_USER=trader
+      - POSTGRES_PASSWORD=secure_password
+    volumes:
+      - postgres_data_enhanced:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+    ports:
+      - "5433:5432"  # Different port from main bot
+    networks:
+      - claudebot-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: claudebot-redis-enhanced
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data_enhanced:/data
+    ports:
+      - "6380:6379"  # Different port from main bot
+    networks:
+      - claudebot-network
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: claudebot-nginx-enhanced
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./enhanced_dashboard/nginx.conf:/etc/nginx/nginx.conf
+      - ./enhanced_dashboard/ssl:/etc/nginx/ssl
+    depends_on:
+      - enhanced-dashboard
+    networks:
+      - claudebot-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data_enhanced:
+  redis_data_enhanced:
+
+networks:
+  claudebot-network:
+    external: true
