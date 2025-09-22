@@ -102,45 +102,79 @@ app.add_middleware(
 # Mount static files
 app.mount("/static", StaticFiles(directory="enhanced_dashboard/static"), name="static")
 
-# Serve direct /css and /js paths because the template (or cached page) requests them
-app.mount("/css", StaticFiles(directory="enhanced_dashboard/static/css"), name="css")
-app.mount("/js", StaticFiles(directory="enhanced_dashboard/static/js"), name="js")
-app.mount("/images", StaticFiles(directory="enhanced_dashboard/static/images"), name="images")
+# Robust static mounts for both layouts:
+#   A) enhanced_dashboard/static/{css,js,images}
+#   B) project-root {css,js} (your current files are here)
+if Path("enhanced_dashboard/static/css").exists():
+    app.mount("/css", StaticFiles(directory="enhanced_dashboard/static/css"), name="css")
+    app.mount("/js", StaticFiles(directory="enhanced_dashboard/static/js"), name="js")
+    app.mount("/images", StaticFiles(directory="enhanced_dashboard/static/images"), name="images")
+else:
+    # fallback to root-level assets
+    if Path("css").exists():
+        app.mount("/css", StaticFiles(directory="css"), name="css")
+    if Path("js").exists():
+        app.mount("/js", StaticFiles(directory="js"), name="js")
+    if Path("images").exists():
+        app.mount("/images", StaticFiles(directory="images"), name="images")
 
 # Favicon
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pathlib import Path
 
 @app.get("/favicon.ico")
 async def favicon():
-    icon_path = Path("enhanced_dashboard/static/images/favicon.ico")
-    if icon_path.exists():
-        return FileResponse(icon_path)
-    return FileResponse(Path("enhanced_dashboard/static/images") / "favicon.png")  # fallback if you have one
+    """Serve favicon if present; otherwise return 204 (no content) to avoid 500."""
+    for p in [
+        Path("enhanced_dashboard/static/images/favicon.ico"),
+        Path("enhanced_dashboard/static/images/favicon.png"),
+        Path("static/images/favicon.ico"),
+        Path("static/images/favicon.png"),
+        Path("favicon.ico"),
+        Path("favicon.png"),
+    ]:
+        if p.exists():
+            return FileResponse(p)
+    return Response(status_code=204)
 
 # Templates
 templates = Jinja2Templates(directory="enhanced_dashboard/templates")
 
 # Database connection
 async def get_db_connection():
-    """Get database connection"""
+    """Get a PostgreSQL connection using the SAME settings as the main bot.
+    Priority:
+      1) DATABASE_URL (postgres://user:pass@host:5432/dbname)
+      2) DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASS envs
+      3) legacy hard-coded fallback (only as last resort)
+    """
     global db_connection
-    
-    if db_connection is None and HAS_PSYCOPG2:
+    if db_connection is not None or not HAS_PSYCOPG2:
+        return db_connection
+
+    import os
+    url = os.getenv("DATABASE_URL", "").strip()
+    if url:
         try:
-            # Try to connect to database
-            db_connection = psycopg2.connect(
-                host="localhost",
-                port="5432",
-                database="trading_bot",
-                user="trader",
-                password="secure_password"
-            )
-            logger.info("✅ Database connected successfully")
+            db_connection = psycopg2.connect(url)
+            logger.info("✅ Database connected via DATABASE_URL")
+            return db_connection
         except Exception as e:
-            logger.warning(f"⚠️ Database connection failed: {e}")
-            db_connection = None
-    
+            logger.warning(f"⚠️ DATABASE_URL connect failed: {e}")
+
+    host = os.getenv("DB_HOST", "localhost")
+    port = os.getenv("DB_PORT", "5432")
+    name = os.getenv("DB_NAME", "trading_bot")
+    user = os.getenv("DB_USER", "trader")
+    pwd  = os.getenv("DB_PASS", "secure_password")
+    try:
+        db_connection = psycopg2.connect(
+            host=host, port=port, database=name, user=user, password=pwd
+        )
+        logger.info(f"✅ Database connected successfully ({user}@{host}:{port}/{name})")
+    except Exception as e:
+        logger.warning(f"⚠️ Database connection failed: {e}")
+        db_connection = None
     return db_connection
 
 # API Routes
@@ -233,11 +267,10 @@ async def debug_schema():
 # Account & Portfolio APIs
 @app.get("/api/account")
 async def get_account():
-    """Overview KPIs."""
+    """Overview KPIs from trades + live positions."""
     realized_pnl = 0.0
     win_rate = 0.0
     total_trades = 0
-
     if HAS_PSYCOPG2:
         conn = await get_db_connection()
         if conn:
@@ -262,136 +295,108 @@ async def get_account():
     positions = (await get_positions())["positions"]
     unrealized = sum(p["pnl"] for p in positions)
     active_positions = len(positions)
-
-    # If you have an account/equity table, use that here. Otherwise keep your baseline.
     starting_balance = 10000.0
     total_pnl = realized_pnl + unrealized
     total_balance = starting_balance + total_pnl
-
     return {
         "total_balance": round(total_balance, 2),
-        "total_pnl": round(total_pnl, 2),
-        "active_positions": active_positions,
-        "win_rate": round(win_rate, 2),
+        "available_balance": round(total_balance, 2),  # no margin tracking here
+        "used_balance": 0.0,
         "realized_pnl": round(realized_pnl, 2),
         "unrealized_pnl": round(unrealized, 2),
+        "total_pnl": round(total_pnl, 2),
+        "active_positions": active_positions,
         "total_trades": total_trades,
-        "winning_trades": int(total_trades * win_rate / 100),
-        "losing_trades": int(total_trades * (100 - win_rate) / 100),
-        "available_balance": max(0, total_balance),
-        "used_balance": abs(min(0, total_pnl)),
-        "initial_capital": starting_balance,
+        "win_rate": round(win_rate, 2),
+        "sharpe_ratio": 0.0,
+        "max_drawdown": 0.0,
         "last_update": datetime.utcnow().isoformat()
     }
 
 @app.get("/api/positions")
 async def get_positions():
-    """Get current positions with live price from market_data.close (1m timeframe)."""
+    """Return open positions with fresh price from market_data.close (1m)."""
     try:
         out = []
-        if HAS_PSYCOPG2:
-            conn = await get_db_connection()
-            if conn:
-                try:
-                    conn.rollback()
-                    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        if not HAS_PSYCOPG2:
+            return {"positions": out}
 
-                    # 1) Open positions
-                    cur.execute("""
-                        SELECT id, symbol, side, size, entry_price, current_price, strategy,
-                               created_at, updated_at, is_open, pnl, pnl_percentage
-                        FROM positions
-                        WHERE is_open = TRUE
-                        ORDER BY created_at DESC
-                        LIMIT 1000
-                    """)
-                    positions = cur.fetchall() or []
-                    logger.info(f"Found {len(positions)} positions in database")
-                    if positions:
-                        logger.info(f"Sample position columns: {list(positions[0].keys())}")
-                        logger.info(f"Sample position data: {positions[0]}")
+        conn = await get_db_connection()
+        if not conn:
+            return {"positions": out}
 
-                    symbols = tuple({p["symbol"] for p in positions})
-                    latest = {}
+        conn.rollback()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-                    if symbols:
-                        # 2) Latest candle per symbol (1m timeframe)
-                        cur.execute(f"""
-                            SELECT md.symbol, md.close AS price
-                            FROM market_data md
-                            JOIN (
-                                SELECT symbol, MAX(timestamp) AS ts
-                                FROM market_data
-                                WHERE timeframe = '1m' AND symbol IN %s
-                                GROUP BY symbol
-                            ) x ON x.symbol = md.symbol AND x.ts = md.timestamp
-                            WHERE md.timeframe = '1m'
-                        """, (symbols,))
-                        latest = {r["symbol"]: float(r["price"]) for r in cur.fetchall()}
+        # 1) Open positions only
+        cur.execute("""
+            SELECT id, symbol, side, size, entry_price, current_price, strategy,
+                   created_at, updated_at, is_open
+            FROM positions
+            WHERE is_open = TRUE AND (closed_at IS NULL)
+            ORDER BY created_at DESC
+            LIMIT 1000
+        """)
+        rows = cur.fetchall() or []
+        symbols = tuple({r["symbol"] for r in rows})
 
-                    def fmt_price(entry, x):
-                        # more decimals for sub-$1 assets, otherwise 4 dp
-                        return round(float(x), 6 if float(entry or 0) < 1 else 4)
+        latest = {}
+        if symbols:
+            # 2) Latest 1m candle close per symbol as "price"
+            cur.execute("""
+                SELECT md.symbol, md.close AS price
+                FROM market_data md
+                JOIN (
+                    SELECT symbol, MAX(timestamp) AS ts
+                    FROM market_data
+                    WHERE timeframe = '1m' AND symbol IN %s
+                    GROUP BY symbol
+                ) x ON x.symbol = md.symbol AND x.ts = md.timestamp
+                WHERE md.timeframe = '1m'
+            """, (symbols,))
+            latest = {r["symbol"]: float(r["price"]) for r in cur.fetchall()}
 
-                    for pos in positions:
-                        sym = pos["symbol"]
-                        entry = float(pos["entry_price"] or 0)
-                        size = float(pos["size"] or 0)
-                        side = (pos["side"] or "").lower()
-                        cp = latest.get(sym, float(pos["current_price"] or entry))
+        def fmt_price(entry, x):
+            e = float(entry or 0)
+            return round(float(x), 6 if e < 1 else 4)
 
-                        if side == "long":
-                            pnl = (cp - entry) * size
-                            pnl_pct = ((cp - entry) / entry * 100) if entry > 0 else 0.0
-                        else:
-                            pnl = (entry - cp) * size
-                            pnl_pct = ((entry - cp) / entry * 100) if entry > 0 else 0.0
+        for r in rows:
+            sym = r["symbol"]
+            entry = float(r["entry_price"] or 0)
+            size  = float(r["size"] or 0)
+            side  = (r["side"] or "").lower()
+            cp    = latest.get(sym, float(r["current_price"] or entry))
 
-                        # Calculate duration
-                        created_at = pos.get('created_at') or pos.get('timestamp')
-                        if created_at:
-                            if hasattr(created_at, 'isoformat'):
-                                duration_seconds = (datetime.utcnow() - created_at).total_seconds()
-                            else:
-                                duration_seconds = (datetime.utcnow() - datetime.fromtimestamp(created_at.timestamp())).total_seconds()
-                            
-                            duration_hours = duration_seconds / 3600
-                            if duration_hours >= 24:
-                                duration_str = f"{int(duration_hours // 24)}d {int(duration_hours % 24)}h"
-                            elif duration_hours >= 1:
-                                duration_str = f"{int(duration_hours)}h {int((duration_seconds % 3600) / 60)}m"
-                            else:
-                                duration_str = f"{int(duration_seconds / 60)}m"
-                        else:
-                            duration_str = "N/A"
-                            duration_hours = 0
+            if entry > 0 and size > 0:
+                if side == "long":
+                    pnl = (cp - entry) * size
+                    pnl_pct = (cp - entry) / entry * 100
+                else:
+                    pnl = (entry - cp) * size
+                    pnl_pct = (entry - cp) / entry * 100
+            else:
+                pnl = 0.0
+                pnl_pct = 0.0
 
-                        out.append({
-                            "id": pos["id"],
-                            "symbol": sym,
-                            "side": side,
-                            "size": round(size, 6),
-                            "entry_price": fmt_price(entry, entry),
-                            "current_price": fmt_price(entry, cp),
-                            "pnl": round(pnl, 2),
-                            "pnl_percentage": round(pnl_pct, 2),
-                            "strategy": pos.get("strategy", "N/A"),
-                            "created_at": pos["created_at"].isoformat() if pos.get("created_at") else None,
-                            "updated_at": pos["updated_at"].isoformat() if pos.get("updated_at") else None,
-                            "is_open": True,
-                            "duration": duration_str,
-                            "duration_hours": round(duration_hours, 2),
-                            "timestamp": created_at.isoformat() if created_at and hasattr(created_at, 'isoformat') else datetime.utcnow().isoformat()
-                        })
+            out.append({
+                "id": r["id"],
+                "symbol": sym,
+                "side": side,
+                "size": round(size, 6),
+                "entry_price": fmt_price(entry, entry),
+                "current_price": fmt_price(entry, cp),
+                "pnl": round(pnl, 2),
+                "pnl_percentage": round(pnl_pct, 2),
+                "strategy": r.get("strategy", "N/A"),
+                "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
+                "updated_at": r["updated_at"].isoformat() if r.get("updated_at") else None,
+                "is_open": True
+            })
 
-                    cur.close()
-                except Exception as e:
-                    logger.warning(f"Error getting positions: {e}")
-                    conn.rollback()
-
+        cur.close()
         return {"positions": out}
     except Exception as e:
-        logger.error(f"Error getting positions: {e}")
+        logger.warning(f"Error getting positions: {e}")
         return {"positions": []}
 
 @app.get("/api/trades")
@@ -647,80 +652,57 @@ async def strategy_perf():
 
 @app.get("/api/analytics/risk-metrics")
 async def get_risk_metrics():
-    """Basic risk: VaR (historical), volatility, max drawdown from closed trades."""
     from statistics import pstdev
-    
-    # Defaults
     out = {"var95": 0.0, "var99": 0.0, "volatility": 0.0, "beta": 0.0, "max_drawdown": 0.0}
-    if not HAS_PSYCOPG2:
-        return out
-
+    if not HAS_PSYCOPG2: return out
     conn = await get_db_connection()
-    if not conn:
-        return out
-
+    if not conn: return out
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("""
-            SELECT pnl, closed_at
-            FROM trades
+            SELECT pnl, closed_at FROM trades
             WHERE closed_at IS NOT NULL
-            ORDER BY closed_at ASC
-            LIMIT 5000
+            ORDER BY closed_at ASC LIMIT 5000
         """)
         rows = cur.fetchall() or []
         cur.close()
     except Exception as e:
-        logger.warning(f"Error getting risk metrics: {e}")
-        conn.rollback()
-        return out
-
-    if not rows:
-        return out
-
+        logger.warning(f"risk metrics: {e}"); conn.rollback(); return out
+    if not rows: return out
     pnls = [float(r["pnl"]) for r in rows]
     vol = pstdev(pnls) if len(pnls) > 1 else 0.0
-    pnls_sorted = sorted(pnls)
-
-    def percentile(vals, p):
+    s = sorted(pnls)
+    def q(vals,p):
         if not vals: return 0.0
-        k = max(0, min(len(vals)-1, int(round((p/100.0)*(len(vals)-1)))))
+        k = max(0,min(len(vals)-1,int(round((p/100)*(len(vals)-1)))))
         return vals[k]
-
-    var95 = min(0.0, percentile(pnls_sorted, 5))
-    var99 = min(0.0, percentile(pnls_sorted, 1))
-
-    equity = 10000.0
-    peak = equity
-    max_dd = 0.0
+    var95 = min(0.0, q(s,5)); var99 = min(0.0, q(s,1))
+    eq = 10000.0; peak = eq; mdd = 0.0
     for pnl in pnls:
-        equity += pnl
-        if equity > peak: peak = equity
-        dd = (equity - peak) / peak if peak > 0 else 0.0
-        if dd < max_dd: max_dd = dd
+        eq += pnl; peak = max(peak,eq)
+        dd = (eq-peak)/peak if peak>0 else 0.0
+        mdd = min(mdd, dd)
+    return {"var95": round(var95,2), "var99": round(var99,2),
+            "volatility": round(vol,2), "beta": 0.0,
+            "max_drawdown": round(abs(mdd)*100,2)}
 
-    out.update({
-        "var95": round(var95, 2),
-        "var99": round(var99, 2),
-        "volatility": round(vol, 2),
-        "beta": 0.0,
-        "max_drawdown": round(abs(max_dd) * 100, 2)
-    })
-    return out
+@app.get("/api/risk/limits")
+async def risk_limits():
+    positions = (await get_positions())["positions"]
+    return {
+        "max_positions": 50,
+        "current_positions": len(positions),
+        "max_correlation": 0.70,
+        "current_correlation": 0.00
+    }
 
 @app.get("/api/market-data")
-async def market_data():
-    """24h OHLCV stats from market_data (1m timeframe)."""
-    if not HAS_PSYCOPG2:
-        return {"market": []}
+async def get_market_data():
+    if not HAS_PSYCOPG2: return {"market": []}
     conn = await get_db_connection()
-    if not conn:
-        return {"market": []}
-
+    if not conn: return {"market": []}
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-        # Build a small universe: symbols seen in positions or trades (last 2 days)
         cur.execute("""
             WITH universe AS (
               SELECT DISTINCT symbol FROM positions
@@ -737,8 +719,7 @@ async def market_data():
                    (SELECT l2.close FROM last24 l2 WHERE l2.symbol = l.symbol ORDER BY l2.timestamp DESC LIMIT 1) AS price,
                    (( (SELECT l2.close FROM last24 l2 WHERE l2.symbol = l.symbol ORDER BY l2.timestamp DESC LIMIT 1)
                      - (SELECT l3.close FROM last24 l3 WHERE l3.symbol = l.symbol ORDER BY l3.timestamp ASC  LIMIT 1)
-                    )
-                    / NULLIF((SELECT l3.close FROM last24 l3 WHERE l3.symbol = l.symbol ORDER BY l3.timestamp ASC LIMIT 1), 0)
+                    ) / NULLIF((SELECT l3.close FROM last24 l3 WHERE l3.symbol = l.symbol ORDER BY l3.timestamp ASC LIMIT 1), 0)
                    ) * 100.0 AS change_24h,
                    SUM(l.volume) AS volume_24h,
                    MAX(l.close) AS high_24h,
@@ -750,8 +731,6 @@ async def market_data():
         """)
         rows = cur.fetchall() or []
         cur.close()
-
-        # Format a bit
         out = []
         for r in rows:
             out.append({
@@ -764,8 +743,7 @@ async def market_data():
             })
         return {"market": out}
     except Exception as e:
-        logger.warning(f"Error getting market data: {e}")
-        conn.rollback()
+        logger.warning(f"market data: {e}"); conn.rollback()
         return {"market": []}
 
 @app.get("/api/config")
