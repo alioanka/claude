@@ -296,11 +296,11 @@ async def get_account():
                 except Exception as e:
                     logger.warning(f"Error getting account data: {e}")
         
-        return {"account": default_account}
+        return default_account
         
     except Exception as e:
         logger.error(f"Error getting account info: {e}")
-        return {"account": {
+        return {
             "total_balance": 10000.0,
             "available_balance": 10000.0,
             "used_balance": 0.0,
@@ -320,7 +320,7 @@ async def get_account():
             "sharpe_ratio": 0.0,
             "initial_capital": 10000.0,
             "last_update": datetime.utcnow().isoformat()
-        }}
+        }
 
 @app.get("/api/positions")
 async def get_positions():
@@ -607,11 +607,11 @@ async def get_performance():
                     logger.warning(f"Error getting performance data: {e}")
                     conn.rollback()
         
-        return {"performance": default_performance}
+        return default_performance
         
     except Exception as e:
         logger.error(f"Error getting performance: {e}")
-        return {"performance": {
+        return {
             "total_trades": 0,
             "winning_trades": 0,
             "losing_trades": 0,
@@ -630,7 +630,7 @@ async def get_performance():
             "daily_pnl": 0.0,
             "weekly_pnl": 0.0,
             "monthly_pnl": 0.0
-        }}
+        }
 
 # Additional API endpoints for dashboard functionality
 @app.get("/api/analytics/strategy-performance")
@@ -789,19 +789,19 @@ async def get_market_data():
     """Get market data"""
     try:
         market_data = {
-            "btc_price": 50000.0,
-            "eth_price": 3000.0,
-            "market_cap": 2000000000000.0,
-            "fear_greed_index": 50,
-            "total_volume": 100000000000.0,
-            "btc_change_24h": 2.5,
-            "eth_change_24h": -1.2,
-            "btc_high_24h": 52000.0,
-            "btc_low_24h": 48000.0,
-            "eth_high_24h": 3100.0,
-            "eth_low_24h": 2900.0,
-            "btc_volume_24h": 50000000000.0,
-            "eth_volume_24h": 30000000000.0
+            "btc_price": 45000.0,  # More realistic current price
+            "eth_price": 2800.0,   # More realistic current price
+            "market_cap": 1800000000000.0,  # Realistic market cap
+            "fear_greed_index": 45,       # Realistic fear/greed
+            "total_volume": 80000000000.0,  # Realistic total volume
+            "btc_change_24h": 1.2,  # Realistic change
+            "eth_change_24h": -0.8, # Realistic change
+            "btc_high_24h": 46000.0,  # Realistic high
+            "btc_low_24h": 44000.0,   # Realistic low
+            "eth_high_24h": 2850.0,   # Realistic high
+            "eth_low_24h": 2750.0,    # Realistic low
+            "btc_volume_24h": 25000000000.0,  # Realistic volume
+            "eth_volume_24h": 15000000000.0   # Realistic volume
         }
         
         return {"market_data": market_data}
