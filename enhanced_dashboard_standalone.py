@@ -267,46 +267,62 @@ async def debug_schema():
 # Account & Portfolio APIs
 @app.get("/api/account")
 async def get_account():
-    """Overview KPIs from trades + live positions."""
+    """Overview KPIs from positions (closed → realized, open → unrealized)."""
     realized_pnl = 0.0
-    win_rate = 0.0
+    unrealized_pnl = 0.0
+    used_balance = 0.0
+    active_positions = 0
     total_trades = 0
+    winning_trades = 0
+    losing_trades = 0
+
     if HAS_PSYCOPG2:
         conn = await get_db_connection()
         if conn:
             try:
                 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                 cur.execute("""
-                    SELECT COALESCE(SUM(pnl),0) AS realized_pnl,
-                           COUNT(*) AS total_trades,
-                           AVG(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) * 100 AS win_rate
-                    FROM trades
-                    WHERE closed_at IS NOT NULL
+                    SELECT 
+                        COALESCE(SUM(CASE WHEN is_open = TRUE  THEN size * entry_price END), 0) AS used_balance,
+                        COALESCE(SUM(CASE WHEN is_open = FALSE THEN pnl END), 0) AS realized_pnl,
+                        COALESCE(SUM(CASE WHEN is_open = TRUE  THEN pnl END), 0) AS unrealized_pnl,
+                        COALESCE(COUNT(CASE WHEN is_open = TRUE  THEN 1 END), 0) AS active_positions,
+                        COALESCE(COUNT(CASE WHEN is_open = FALSE THEN 1 END), 0) AS total_trades,
+                        COALESCE(COUNT(CASE WHEN is_open = FALSE AND pnl > 0 THEN 1 END), 0) AS winning_trades,
+                        COALESCE(COUNT(CASE WHEN is_open = FALSE AND pnl < 0 THEN 1 END), 0) AS losing_trades
+                    FROM positions
                 """)
                 row = cur.fetchone() or {}
-                realized_pnl = float(row.get("realized_pnl") or 0.0)
-                total_trades = int(row.get("total_trades") or 0)
-                win_rate = float(row.get("win_rate") or 0.0)
                 cur.close()
-            except Exception as e:
-                logger.warning(f"Error aggregating trades: {e}")
-                conn.rollback()
 
-    positions = (await get_positions())["positions"]
-    unrealized = sum(p["pnl"] for p in positions)
-    active_positions = len(positions)
+                used_balance     = float(row.get("used_balance") or 0.0)
+                realized_pnl     = float(row.get("realized_pnl") or 0.0)
+                unrealized_pnl   = float(row.get("unrealized_pnl") or 0.0)
+                active_positions = int(row.get("active_positions") or 0)
+                total_trades     = int(row.get("total_trades") or 0)
+                winning_trades   = int(row.get("winning_trades") or 0)
+                losing_trades    = int(row.get("losing_trades") or 0)
+
+            except Exception as e:
+                logger.warning(f"/api/account aggregation error: {e}")
+
     starting_balance = 10000.0
-    total_pnl = realized_pnl + unrealized
+    total_pnl = realized_pnl + unrealized_pnl
     total_balance = starting_balance + total_pnl
+    available_balance = total_balance - used_balance
+    win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0.0
+
     return {
         "total_balance": round(total_balance, 2),
-        "available_balance": round(total_balance, 2),  # no margin tracking here
-        "used_balance": 0.0,
+        "available_balance": round(available_balance, 2),
+        "used_balance": round(used_balance, 2),
         "realized_pnl": round(realized_pnl, 2),
-        "unrealized_pnl": round(unrealized, 2),
+        "unrealized_pnl": round(unrealized_pnl, 2),
         "total_pnl": round(total_pnl, 2),
         "active_positions": active_positions,
         "total_trades": total_trades,
+        "winning_trades": winning_trades,
+        "losing_trades": losing_trades,
         "win_rate": round(win_rate, 2),
         "sharpe_ratio": 0.0,
         "max_drawdown": 0.0,
@@ -378,6 +394,20 @@ async def get_positions():
                 pnl = 0.0
                 pnl_pct = 0.0
 
+            # Duration (approx, from created_at → now)
+            created_at = r.get("created_at")
+            if created_at:
+                duration_seconds = (datetime.utcnow() - created_at).total_seconds()
+                hours = duration_seconds / 3600
+                if hours >= 24:
+                    duration_str = f"{int(hours // 24)}d {int(hours % 24)}h"
+                elif hours >= 1:
+                    duration_str = f"{int(hours)}h {int((duration_seconds % 3600) / 60)}m"
+                else:
+                    duration_str = f"{int(duration_seconds / 60)}m"
+            else:
+                duration_str = "N/A"
+
             out.append({
                 "id": r["id"],
                 "symbol": sym,
@@ -388,9 +418,10 @@ async def get_positions():
                 "pnl": round(pnl, 2),
                 "pnl_percentage": round(pnl_pct, 2),
                 "strategy": r.get("strategy", "N/A"),
-                "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
+                "created_at": created_at.isoformat() if created_at else None,
                 "updated_at": r["updated_at"].isoformat() if r.get("updated_at") else None,
-                "is_open": True
+                "is_open": True,
+                "duration": duration_str
             })
 
         cur.close()
@@ -620,68 +651,106 @@ async def get_performance():
 
 # Additional API endpoints for dashboard functionality
 @app.get("/api/analytics/strategy-performance")
-async def strategy_perf():
-    """Per-strategy aggregation from closed positions or trades."""
+async def strategy_performance():
+    """Per-strategy aggregation from CLOSED positions."""
+    out = {"strategy_performance": []}
     if not HAS_PSYCOPG2:
-        return {"strategies": []}
+        return out
+
     conn = await get_db_connection()
     if not conn:
-        return {"strategies": []}
+        return out
+
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("""
-            SELECT strategy,
-                   COUNT(*) AS trades,
-                   AVG(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) * 100 AS win_rate,
-                   SUM(pnl) AS total_pnl,
-                   AVG(pnl) AS avg_pnl
-            FROM trades
-            WHERE closed_at IS NOT NULL
+            SELECT 
+                strategy,
+                COUNT(*) AS trades,
+                AVG(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) * 100 AS win_rate,
+                SUM(pnl) AS total_pnl,
+                AVG(pnl) AS avg_pnl,
+                MAX(pnl) AS max_win,
+                MIN(pnl) AS max_loss
+            FROM positions
+            WHERE is_open = FALSE
             GROUP BY strategy
             ORDER BY total_pnl DESC
         """)
         rows = cur.fetchall() or []
         cur.close()
-        for r in rows:
-            r["sharpe_ratio"] = 0.0
-        return {"strategies": rows}
     except Exception as e:
         logger.warning(f"Error computing strategy performance: {e}")
         conn.rollback()
-        return {"strategies": []}
+        return out
+
+    out["strategy_performance"] = [{
+        "strategy": r.get("strategy") or "N/A",
+        "trades": int(r.get("trades") or 0),
+        "win_rate": round(float(r.get("win_rate") or 0.0), 2),
+        "total_pnl": round(float(r.get("total_pnl") or 0.0), 2),
+        "avg_pnl": round(float(r.get("avg_pnl") or 0.0), 2),
+        "max_win": round(float(r.get("max_win") or 0.0), 2),
+        "max_loss": round(float(r.get("max_loss") or 0.0), 2),
+        "sharpe_ratio": 0.0
+    } for r in rows]
+    return out
 
 @app.get("/api/analytics/risk-metrics")
 async def get_risk_metrics():
-    from statistics import pstdev
+    """Basic risk: VaR (historical), volatility, max drawdown from CLOSED positions."""
     out = {"var95": 0.0, "var99": 0.0, "volatility": 0.0, "beta": 0.0, "max_drawdown": 0.0}
-    if not HAS_PSYCOPG2: return out
+    if not HAS_PSYCOPG2: 
+        return out
+
     conn = await get_db_connection()
-    if not conn: return out
+    if not conn:
+        return out
+
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("""
-            SELECT pnl, closed_at FROM trades
-            WHERE closed_at IS NOT NULL
-            ORDER BY closed_at ASC LIMIT 5000
+            SELECT pnl
+            FROM positions
+            WHERE is_open = FALSE AND pnl IS NOT NULL
+            ORDER BY closed_at ASC
+            LIMIT 5000
         """)
         rows = cur.fetchall() or []
         cur.close()
     except Exception as e:
-        logger.warning(f"risk metrics: {e}"); conn.rollback(); return out
-    if not rows: return out
+        logger.warning(f"risk metrics: {e}")
+        conn.rollback()
+        return out
+
+    if not rows:
+        return out
+
     pnls = [float(r["pnl"]) for r in rows]
-    vol = pstdev(pnls) if len(pnls) > 1 else 0.0
+    # population std
+    if len(pnls) > 1:
+        mean = sum(pnls)/len(pnls)
+        variance = sum((x-mean)**2 for x in pnls)/len(pnls)
+        vol = variance ** 0.5
+    else:
+        vol = 0.0
+
     s = sorted(pnls)
     def q(vals,p):
         if not vals: return 0.0
         k = max(0,min(len(vals)-1,int(round((p/100)*(len(vals)-1)))))
         return vals[k]
-    var95 = min(0.0, q(s,5)); var99 = min(0.0, q(s,1))
+
+    var95 = min(0.0, q(s,5))
+    var99 = min(0.0, q(s,1))
+
     eq = 10000.0; peak = eq; mdd = 0.0
     for pnl in pnls:
-        eq += pnl; peak = max(peak,eq)
-        dd = (eq-peak)/peak if peak>0 else 0.0
+        eq += pnl
+        peak = max(peak, eq)
+        dd = (eq-peak)/peak if peak > 0 else 0.0
         mdd = min(mdd, dd)
+
     return {"var95": round(var95,2), "var99": round(var99,2),
             "volatility": round(vol,2), "beta": 0.0,
             "max_drawdown": round(abs(mdd)*100,2)}
@@ -697,29 +766,43 @@ async def risk_limits():
     }
 
 @app.get("/api/market-data")
-async def get_market_data():
-    if not HAS_PSYCOPG2: return {"market": []}
+async def market_data():
+    """24h OHLCV stats from market_data (1m timeframe) for symbols in positions/trades."""
+    if not HAS_PSYCOPG2:
+        return {"market": []}
     conn = await get_db_connection()
-    if not conn: return {"market": []}
+    if not conn:
+        return {"market": []}
+
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        # Build a universe from your actual symbols; if empty, return []
         cur.execute("""
             WITH universe AS (
               SELECT DISTINCT symbol FROM positions
               UNION
               SELECT DISTINCT symbol FROM trades
-            ),
-            last24 AS (
+            )
+            SELECT symbol FROM universe
+        """)
+        syms = [r["symbol"] for r in cur.fetchall() or []]
+        if not syms:
+            cur.close()
+            return {"market": []}
+
+        # 24h window by symbol
+        cur.execute("""
+            WITH last24 AS (
               SELECT md.symbol, md.timestamp, md.close, md.volume
               FROM market_data md
-              JOIN universe u ON u.symbol = md.symbol
-              WHERE md.timeframe = '1m' AND md.timestamp >= NOW() - INTERVAL '24 hours'
+              WHERE md.timeframe = '1m' AND md.symbol = ANY(%s) AND md.timestamp >= NOW() - INTERVAL '24 hours'
             )
             SELECT l.symbol,
                    (SELECT l2.close FROM last24 l2 WHERE l2.symbol = l.symbol ORDER BY l2.timestamp DESC LIMIT 1) AS price,
                    (( (SELECT l2.close FROM last24 l2 WHERE l2.symbol = l.symbol ORDER BY l2.timestamp DESC LIMIT 1)
                      - (SELECT l3.close FROM last24 l3 WHERE l3.symbol = l.symbol ORDER BY l3.timestamp ASC  LIMIT 1)
-                    ) / NULLIF((SELECT l3.close FROM last24 l3 WHERE l3.symbol = l.symbol ORDER BY l3.timestamp ASC LIMIT 1), 0)
+                    )
+                    / NULLIF((SELECT l3.close FROM last24 l3 WHERE l3.symbol = l.symbol ORDER BY l3.timestamp ASC LIMIT 1), 0)
                    ) * 100.0 AS change_24h,
                    SUM(l.volume) AS volume_24h,
                    MAX(l.close) AS high_24h,
@@ -728,11 +811,16 @@ async def get_market_data():
             GROUP BY l.symbol
             ORDER BY l.symbol
             LIMIT 200
-        """)
+        """, (syms,))
         rows = cur.fetchall() or []
         cur.close()
+
+        # If there's still nothing (no candles), return []
         out = []
         for r in rows:
+            # skip symbols without any price in 24h (avoid zeros)
+            if r["price"] is None:
+                continue
             out.append({
                 "symbol": r["symbol"],
                 "price": round(float(r["price"] or 0), 6),
@@ -743,7 +831,8 @@ async def get_market_data():
             })
         return {"market": out}
     except Exception as e:
-        logger.warning(f"market data: {e}"); conn.rollback()
+        logger.warning(f"Error getting market data: {e}")
+        conn.rollback()
         return {"market": []}
 
 @app.get("/api/config")
