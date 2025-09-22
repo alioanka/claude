@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Safe Enhanced Dashboard Runner
-This script runs the enhanced dashboard without affecting existing bots
+Enhanced Dashboard using proven DashboardManager
+Reuses the same logic as your working dashboard on port 8000
 """
 
-import os
+import uvicorn
+import logging
 import sys
 from pathlib import Path
 
@@ -12,33 +13,27 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-# Set environment variables to avoid conflicts
-os.environ['DASHBOARD_PORT'] = '8001'
-os.environ['DASHBOARD_HOST'] = '0.0.0.0'
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("enhanced_dashboard_safe")
 
-# Import and run the enhanced dashboard
-try:
-    from enhanced_dashboard_standalone import app
-    import uvicorn
-    
-    print("🚀 Starting Enhanced Dashboard on port 8001...")
-    print("📊 Dashboard will be available at: http://localhost:8001")
-    print("🔗 API documentation: http://localhost:8001/api/docs")
-    print("⚠️  This will NOT affect your existing bots running on other ports")
-    print("=" * 60)
-    
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8001,
-        reload=False,
-        log_level="info"
-    )
-    
-except ImportError as e:
-    print(f"❌ Error importing enhanced dashboard: {e}")
-    print("Please run the installation script first")
-    sys.exit(1)
-except Exception as e:
-    print(f"❌ Error starting enhanced dashboard: {e}")
-    sys.exit(1)
+PORT = int(os.environ.get("ENHANCED_DASHBOARD_PORT", "8001"))
+
+def main():
+    """Run the enhanced dashboard standalone"""
+    logger.info(f"🚀 Starting Enhanced Dashboard on port {PORT}...")
+    logger.info(f"📊 Dashboard will be available at: http://localhost:{PORT}")
+    logger.info(f"🔗 API documentation: http://localhost:{PORT}/docs")
+    logger.info("⚠️ This will NOT affect your existing bots running on other ports")
+    logger.info("=" * 60)
+
+    try:
+        # Import the enhanced dashboard standalone
+        from enhanced_dashboard_standalone import app
+        
+        uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
+    except Exception as e:
+        logger.error(f"❌ Error starting enhanced dashboard: {e}")
+        return 1
+
+if __name__ == "__main__":
+    exit(main())

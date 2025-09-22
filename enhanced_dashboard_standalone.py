@@ -713,7 +713,7 @@ async def get_risk_metrics():
             SELECT pnl
             FROM positions
             WHERE is_open = FALSE AND pnl IS NOT NULL
-            ORDER BY closed_at ASC
+            ORDER BY created_at ASC
             LIMIT 5000
         """)
         rows = cur.fetchall() or []
@@ -790,26 +790,20 @@ async def market_data():
             cur.close()
             return {"market": []}
 
-        # 24h window by symbol
+        # 24h window by symbol - use close as price
         cur.execute("""
-            WITH last24 AS (
-              SELECT md.symbol, md.timestamp, md.close, md.volume
-              FROM market_data md
-              WHERE md.timeframe = '1m' AND md.symbol = ANY(%s) AND md.timestamp >= NOW() - INTERVAL '24 hours'
-            )
-            SELECT l.symbol,
-                   (SELECT l2.close FROM last24 l2 WHERE l2.symbol = l.symbol ORDER BY l2.timestamp DESC LIMIT 1) AS price,
-                   (( (SELECT l2.close FROM last24 l2 WHERE l2.symbol = l.symbol ORDER BY l2.timestamp DESC LIMIT 1)
-                     - (SELECT l3.close FROM last24 l3 WHERE l3.symbol = l.symbol ORDER BY l3.timestamp ASC  LIMIT 1)
-                    )
-                    / NULLIF((SELECT l3.close FROM last24 l3 WHERE l3.symbol = l.symbol ORDER BY l3.timestamp ASC LIMIT 1), 0)
-                   ) * 100.0 AS change_24h,
-                   SUM(l.volume) AS volume_24h,
-                   MAX(l.close) AS high_24h,
-                   MIN(l.close) AS low_24h
-            FROM last24 l
-            GROUP BY l.symbol
-            ORDER BY l.symbol
+            SELECT symbol,
+                   close AS price,
+                   MAX(high) AS high_24h,
+                   MIN(low) AS low_24h,
+                   SUM(volume) AS volume_24h,
+                   0.0 AS change_24h
+            FROM market_data
+            WHERE timeframe = '1m' 
+              AND symbol = ANY(%s) 
+              AND timestamp >= NOW() - INTERVAL '24 hours'
+            GROUP BY symbol
+            ORDER BY symbol
             LIMIT 200
         """, (syms,))
         rows = cur.fetchall() or []
@@ -888,9 +882,15 @@ async def get_config():
         logger.error(f"Error getting config: {e}")
         return {
             "max_positions": 50,
-            "stop_loss": 0.01,
-            "take_profit": 0.025,
-            "max_daily_loss": 0.03
+            "max_correlation": 0.70,
+            "stop_loss_pct": 0.02,
+            "take_profit_pct": 0.04,
+            "max_daily_loss_pct": 0.05,
+            "strategies": [
+                {"name": "Momentum Strategy", "allocation": 0.60},
+                {"name": "Mean Reversion", "allocation": 0.30},
+                {"name": "Arbitrage", "allocation": 0.10},
+            ]
         }
 
 @app.get("/api/risk/limits")
