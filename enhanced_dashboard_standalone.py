@@ -124,17 +124,7 @@ from pathlib import Path
 
 @app.get("/favicon.ico")
 async def favicon():
-    """Serve favicon if present; otherwise return 204 (no content) to avoid 500."""
-    for p in [
-        Path("enhanced_dashboard/static/images/favicon.ico"),
-        Path("enhanced_dashboard/static/images/favicon.png"),
-        Path("static/images/favicon.ico"),
-        Path("static/images/favicon.png"),
-        Path("favicon.ico"),
-        Path("favicon.png"),
-    ]:
-        if p.exists():
-            return FileResponse(p)
+    """Return a simple 204 response to avoid 404/500 errors."""
     return Response(status_code=204)
 
 # Templates
@@ -792,20 +782,39 @@ async def market_data():
 
         # 24h window by symbol - use close as price
         cur.execute("""
-            SELECT symbol,
-                   close AS price,
-                   MAX(high) AS high_24h,
-                   MIN(low) AS low_24h,
-                   SUM(volume) AS volume_24h,
-                   0.0 AS change_24h
-            FROM market_data
-            WHERE timeframe = '1m' 
-              AND symbol = ANY(%s) 
-              AND timestamp >= NOW() - INTERVAL '24 hours'
-            GROUP BY symbol
-            ORDER BY symbol
+            WITH universe AS (
+              SELECT DISTINCT symbol FROM positions
+              UNION
+              SELECT DISTINCT symbol FROM trades
+            ),
+            latest AS (
+              SELECT m.symbol, m.close AS price
+              FROM market_data m
+              JOIN (
+                SELECT symbol, MAX(timestamp) AS ts
+                FROM market_data
+                WHERE timeframe = '1m'
+                GROUP BY symbol
+              ) x ON x.symbol = m.symbol AND x.ts = m.timestamp
+              WHERE m.timeframe = '1m'
+            )
+            SELECT m.symbol,
+                   l.price                             AS price,
+                   MAX(m.high)                         AS high_24h,
+                   MIN(m.low)                          AS low_24h,
+                   SUM(m.volume)                       AS volume_24h,
+                   ( (l.price - FIRST_VALUE(m.close) OVER (PARTITION BY m.symbol ORDER BY m.timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING))
+                     / NULLIF(FIRST_VALUE(m.close) OVER (PARTITION BY m.symbol ORDER BY m.timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), 0) * 100
+                   )                                   AS change_24h
+            FROM market_data m
+            JOIN universe u ON u.symbol = m.symbol
+            JOIN latest   l ON l.symbol = m.symbol
+            WHERE m.timeframe = '1m'
+              AND m.timestamp >= NOW() - INTERVAL '24 hours'
+            GROUP BY m.symbol, l.price
+            ORDER BY m.symbol
             LIMIT 200
-        """, (syms,))
+        """)
         rows = cur.fetchall() or []
         cur.close()
 
@@ -876,21 +885,46 @@ async def get_config():
         cfg["stop_loss_percent"] = cfg.get("stop_loss", 1.0)
         cfg["take_profit_percent"] = cfg.get("take_profit", 2.5)
         
-        return cfg
+        # Return in the expected format for the UI
+        return {
+            "trading": {
+                "max_positions": cfg["max_positions"],
+                "stop_loss_pct": cfg["stop_loss"] * 100,  # Convert to percentage
+                "take_profit_pct": cfg["take_profit"] * 100,  # Convert to percentage
+                "max_daily_loss_pct": cfg["max_daily_loss"] * 100,  # Convert to percentage
+            },
+            "strategies": [
+                {"name": "Enhanced Momentum Strategy", "allocation": 60},
+                {"name": "Mean Reversion Strategy", "allocation": 30},
+                {"name": "Arbitrage Strategy", "allocation": 10},
+            ],
+            # Keep original fields for backward compatibility
+            "max_positions": cfg["max_positions"],
+            "stop_loss_percent": cfg["stop_loss"] * 100,
+            "take_profit_percent": cfg["take_profit"] * 100,
+            "max_daily_loss": cfg["max_daily_loss"] * 100,
+            "max_correlation": cfg["max_correlation"],
+        }
         
     except Exception as e:
         logger.error(f"Error getting config: {e}")
         return {
-            "max_positions": 50,
-            "max_correlation": 0.70,
-            "stop_loss_pct": 0.02,
-            "take_profit_pct": 0.04,
-            "max_daily_loss_pct": 0.05,
+            "trading": {
+                "max_positions": 50,
+                "stop_loss_pct": 2.0,
+                "take_profit_pct": 4.0,
+                "max_daily_loss_pct": 5.0,
+            },
             "strategies": [
-                {"name": "Momentum Strategy", "allocation": 0.60},
-                {"name": "Mean Reversion", "allocation": 0.30},
-                {"name": "Arbitrage", "allocation": 0.10},
-            ]
+                {"name": "Enhanced Momentum Strategy", "allocation": 60},
+                {"name": "Mean Reversion Strategy", "allocation": 30},
+                {"name": "Arbitrage Strategy", "allocation": 10},
+            ],
+            "max_positions": 50,
+            "stop_loss_percent": 2.0,
+            "take_profit_percent": 4.0,
+            "max_daily_loss": 5.0,
+            "max_correlation": 0.70,
         }
 
 @app.get("/api/risk/limits")
