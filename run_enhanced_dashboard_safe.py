@@ -4,6 +4,7 @@ Enhanced Dashboard using proven DashboardManager
 Reuses the same logic as your working dashboard on port 8000
 """
 
+import os
 import uvicorn
 import logging
 import sys
