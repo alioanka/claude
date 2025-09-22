@@ -249,30 +249,58 @@ async def get_account():
                 try:
                     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                     
-                    # Get account balance
-                    cursor.execute("SELECT * FROM account_balance ORDER BY timestamp DESC LIMIT 1")
-                    balance_row = cursor.fetchone()
+                    # Get account statistics from positions
+                    cursor.execute("""
+                        SELECT 
+                            SUM(CASE WHEN is_open = true THEN size * entry_price ELSE 0 END) as used_balance,
+                            SUM(CASE WHEN is_open = false THEN pnl ELSE 0 END) as realized_pnl,
+                            SUM(CASE WHEN is_open = true THEN pnl ELSE 0 END) as unrealized_pnl,
+                            COUNT(CASE WHEN is_open = true THEN 1 END) as active_positions,
+                            COUNT(CASE WHEN is_open = false THEN 1 END) as total_trades,
+                            COUNT(CASE WHEN is_open = false AND pnl > 0 THEN 1 END) as winning_trades,
+                            COUNT(CASE WHEN is_open = false AND pnl < 0 THEN 1 END) as losing_trades
+                        FROM positions
+                    """)
                     
+                    balance_row = cursor.fetchone()
                     if balance_row:
+                        used_balance = float(balance_row.get('used_balance', 0.0))
+                        realized_pnl = float(balance_row.get('realized_pnl', 0.0))
+                        unrealized_pnl = float(balance_row.get('unrealized_pnl', 0.0))
+                        active_positions = int(balance_row.get('active_positions', 0))
+                        total_trades = int(balance_row.get('total_trades', 0))
+                        winning_trades = int(balance_row.get('winning_trades', 0))
+                        losing_trades = int(balance_row.get('losing_trades', 0))
+                        
+                        win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0.0
+                        total_balance = 10000.0 + realized_pnl  # Starting balance + realized PnL
+                        available_balance = total_balance - used_balance
+                        total_pnl = realized_pnl + unrealized_pnl
+                        
                         default_account.update({
-                            "total_balance": float(balance_row.get('total_balance', 10000.0)),
-                            "available_balance": float(balance_row.get('available_balance', 10000.0)),
-                            "used_balance": float(balance_row.get('used_balance', 0.0)),
-                            "unrealized_pnl": float(balance_row.get('unrealized_pnl', 0.0)),
-                            "realized_pnl": float(balance_row.get('realized_pnl', 0.0)),
-                            "total_pnl": float(balance_row.get('total_pnl', 0.0)),
-                            "last_update": balance_row.get('timestamp', datetime.utcnow()).isoformat()
+                            "total_balance": total_balance,
+                            "available_balance": max(0, available_balance),
+                            "used_balance": used_balance,
+                            "realized_pnl": realized_pnl,
+                            "unrealized_pnl": unrealized_pnl,
+                            "total_pnl": total_pnl,
+                            "active_positions": active_positions,
+                            "total_trades": total_trades,
+                            "winning_trades": winning_trades,
+                            "losing_trades": losing_trades,
+                            "win_rate": win_rate,
+                            "last_update": datetime.utcnow().isoformat()
                         })
                     
                     cursor.close()
                 except Exception as e:
                     logger.warning(f"Error getting account data: {e}")
         
-        return default_account
+        return {"account": default_account}
         
     except Exception as e:
         logger.error(f"Error getting account info: {e}")
-        return {
+        return {"account": {
             "total_balance": 10000.0,
             "available_balance": 10000.0,
             "used_balance": 0.0,
@@ -292,7 +320,7 @@ async def get_account():
             "sharpe_ratio": 0.0,
             "initial_capital": 10000.0,
             "last_update": datetime.utcnow().isoformat()
-        }
+        }}
 
 @app.get("/api/positions")
 async def get_positions():
@@ -342,25 +370,22 @@ async def get_positions():
                             duration_str = "N/A"
                             duration_hours = 0
                         
-                        # Try different possible column names for size
-                        size_value = pos.get('size') or pos.get('quantity') or pos.get('amount') or 0.0
-                        size_value = float(size_value) if size_value is not None else 0.0
+                        # Use correct column names from Position model
+                        size_value = float(pos.get('size', 0.0))
+                        entry_price = float(pos.get('entry_price', 0.0))
+                        current_price = float(pos.get('current_price', 0.0))
                         
-                        # Try different possible column names for entry price
-                        entry_price = pos.get('entry_price') or pos.get('price') or pos.get('open_price') or 0.0
-                        entry_price = float(entry_price) if entry_price is not None else 0.0
-                        
-                        # Try different possible column names for current price
-                        current_price = pos.get('current_price') or pos.get('market_price') or pos.get('close_price') or entry_price
-                        current_price = float(current_price) if current_price is not None else entry_price
-                        
-                        # Try different possible column names for PnL
-                        pnl_value = pos.get('unrealized_pnl') or pos.get('pnl') or pos.get('profit_loss') or 0.0
-                        pnl_value = float(pnl_value) if pnl_value is not None else 0.0
-                        
-                        # Try different possible column names for PnL percentage
-                        pnl_percentage = pos.get('unrealized_pnl_percentage') or pos.get('pnl_percentage') or pos.get('profit_loss_percentage') or 0.0
-                        pnl_percentage = float(pnl_percentage) if pnl_percentage is not None else 0.0
+                        # Calculate PnL if current_price is available
+                        if current_price > 0 and entry_price > 0:
+                            if pos.get('side', '').lower() == 'long':
+                                pnl_value = (current_price - entry_price) * size_value
+                            else:  # short
+                                pnl_value = (entry_price - current_price) * size_value
+                            pnl_percentage = (pnl_value / (entry_price * size_value)) * 100 if entry_price * size_value > 0 else 0.0
+                        else:
+                            # Use database values if calculation not possible
+                            pnl_value = float(pos.get('pnl', 0.0))
+                            pnl_percentage = float(pos.get('pnl_percentage', 0.0))
                         
                         positions_data.append({
                             "symbol": pos.get('symbol', 'N/A'),
@@ -457,9 +482,17 @@ async def get_trades(limit: int = 100, strategy: str = None):
                         # Map closed positions data (already selected with correct column names)
                         size_value = float(trade.get('size', 0.0))
                         entry_price = float(trade.get('price', 0.0))  # entry_price aliased as price
-                        exit_price = None  # Closed positions don't have exit price in this query
                         pnl_value = float(trade.get('pnl', 0.0))
                         pnl_percentage = float(trade.get('pnl_percentage', 0.0))
+                        
+                        # Calculate exit price from PnL and entry price
+                        if pnl_value != 0 and entry_price > 0 and size_value > 0:
+                            if trade.get('side', '').lower() == 'long':
+                                exit_price = entry_price + (pnl_value / size_value)
+                            else:  # short
+                                exit_price = entry_price - (pnl_value / size_value)
+                        else:
+                            exit_price = entry_price  # If no PnL, exit price = entry price
                         
                         # Calculate duration from created_at to closed_at
                         opened_at = trade.get('timestamp')  # created_at aliased as timestamp
@@ -574,11 +607,11 @@ async def get_performance():
                     logger.warning(f"Error getting performance data: {e}")
                     conn.rollback()
         
-        return default_performance
+        return {"performance": default_performance}
         
     except Exception as e:
         logger.error(f"Error getting performance: {e}")
-        return {
+        return {"performance": {
             "total_trades": 0,
             "winning_trades": 0,
             "losing_trades": 0,
@@ -597,7 +630,7 @@ async def get_performance():
             "daily_pnl": 0.0,
             "weekly_pnl": 0.0,
             "monthly_pnl": 0.0
-        }
+        }}
 
 # Additional API endpoints for dashboard functionality
 @app.get("/api/analytics/strategy-performance")
@@ -665,12 +698,25 @@ async def get_risk_metrics():
         risk_metrics = {
             "max_drawdown": 0.0,
             "var_95": 0.0,
+            "var_99": 0.0,
             "sharpe_ratio": 0.0,
             "sortino_ratio": 0.0,
             "calmar_ratio": 0.0,
             "max_consecutive_losses": 0,
             "current_drawdown": 0.0,
-            "risk_score": 0.0
+            "risk_score": 0.0,
+            "max_correlation": 0.7,
+            "current_correlation": 0.0,
+            "volatility": 0.0,
+            "beta": 0.0,
+            "max_positions": 50,
+            "current_positions": 0,
+            "position_limit_usage": 0.0,
+            "daily_loss_limit": 3.0,
+            "current_daily_loss": 0.0,
+            "risk_per_trade": 1.0,
+            "max_position_size": 1000.0,
+            "min_position_size": 10.0
         }
         
         if HAS_PSYCOPG2:
@@ -717,12 +763,25 @@ async def get_risk_metrics():
         return {
             "max_drawdown": 0.0,
             "var_95": 0.0,
+            "var_99": 0.0,
             "sharpe_ratio": 0.0,
             "sortino_ratio": 0.0,
             "calmar_ratio": 0.0,
             "max_consecutive_losses": 0,
             "current_drawdown": 0.0,
-            "risk_score": 0.0
+            "risk_score": 0.0,
+            "max_correlation": 0.7,
+            "current_correlation": 0.0,
+            "volatility": 0.0,
+            "beta": 0.0,
+            "max_positions": 50,
+            "current_positions": 0,
+            "position_limit_usage": 0.0,
+            "daily_loss_limit": 3.0,
+            "current_daily_loss": 0.0,
+            "risk_per_trade": 1.0,
+            "max_position_size": 1000.0,
+            "min_position_size": 10.0
         }
 
 @app.get("/api/market-data")
@@ -740,7 +799,9 @@ async def get_market_data():
             "btc_high_24h": 52000.0,
             "btc_low_24h": 48000.0,
             "eth_high_24h": 3100.0,
-            "eth_low_24h": 2900.0
+            "eth_low_24h": 2900.0,
+            "btc_volume_24h": 50000000000.0,
+            "eth_volume_24h": 30000000000.0
         }
         
         return {"market_data": market_data}
@@ -754,12 +815,68 @@ async def get_config():
     """Get bot configuration"""
     try:
         config_data = {
-            "trading_pairs": ["BTCUSDT", "ETHUSDT", "ADAUSDT"],
+            "trading_pairs": ["BTCUSDT", "ETHUSDT", "ADAUSDT", "SOLUSDT", "DOTUSDT", "LINKUSDT", "UNIUSDT", "AVAXUSDT", "MATICUSDT", "ATOMUSDT"],
             "max_positions": 50,
-            "stop_loss_percent": 0.01,
-            "take_profit_percent": 0.025,
-            "max_daily_loss": 0.03,
-            "risk_per_trade": 0.01
+            "stop_loss_percent": 1.0,
+            "take_profit_percent": 2.5,
+            "max_daily_loss": 3.0,
+            "risk_per_trade": 1.0,
+            "max_correlation": 0.7,
+            "volatility_filter": True,
+            "min_volume_ratio": 1.5,
+            "position_sizing": "fixed",
+            "leverage": 1.0,
+            "max_position_size": 1000.0,
+            "min_position_size": 10.0,
+            "strategies": {
+                "momentum_strategy": {
+                    "enabled": True,
+                    "allocation": 60,
+                    "parameters": {
+                        "ema_fast": 8,
+                        "ema_slow": 21,
+                        "rsi_overbought": 75,
+                        "rsi_oversold": 25,
+                        "macd_fast": 8,
+                        "macd_slow": 21,
+                        "volume_threshold": 2.0,
+                        "min_trend_strength": 0.03
+                    }
+                },
+                "mean_reversion": {
+                    "enabled": True,
+                    "allocation": 30,
+                    "parameters": {
+                        "bb_std_dev": 1.5,
+                        "rsi_overbought": 70,
+                        "rsi_oversold": 30,
+                        "z_score_period": 30,
+                        "z_score_threshold": 1.0,
+                        "volume_threshold": 1.0
+                    }
+                },
+                "arbitrage_strategy": {
+                    "enabled": True,
+                    "allocation": 10,
+                    "parameters": {
+                        "min_spread_threshold": 0.001,
+                        "max_spread_threshold": 0.08,
+                        "correlation_threshold": 0.6,
+                        "lookback_period": 50,
+                        "z_score_threshold": 0.5
+                    }
+                }
+            },
+            "exchanges": {
+                "binance": {"enabled": True, "api_key": "***", "secret": "***"},
+                "bybit": {"enabled": True, "api_key": "***", "secret": "***"},
+                "kucoin": {"enabled": True, "api_key": "***", "secret": "***"}
+            },
+            "notifications": {
+                "email": {"enabled": False, "address": ""},
+                "telegram": {"enabled": False, "bot_token": "", "chat_id": ""},
+                "discord": {"enabled": False, "webhook_url": ""}
+            }
         }
         
         return config_data
@@ -841,30 +958,34 @@ async def update_dashboard_data():
     while True:
         try:
             if manager.active_connections:
-                logger.debug(f"Updating dashboard data for {len(manager.active_connections)} connections")
+                logger.info(f"Updating dashboard data for {len(manager.active_connections)} connections")
                 
                 # Get latest data
                 account_data = await get_account()
                 positions_data = await get_positions()
+                trades_data = await get_trades()
+                performance_data = await get_performance()
                 
                 # Send update to all connected clients
                 await manager.broadcast(json.dumps({
                     "type": "dashboard_update",
                     "data": {
                         "account": account_data,
-                        "positions": positions_data
+                        "positions": positions_data,
+                        "trades": trades_data,
+                        "performance": performance_data
                     },
                     "timestamp": datetime.utcnow().isoformat()
                 }))
                 
-                logger.debug("Dashboard data update sent")
+                logger.info("Dashboard data update sent successfully")
             else:
                 logger.debug("No active WebSocket connections")
             
-            await asyncio.sleep(5)  # Update every 5 seconds
+            await asyncio.sleep(3)  # Update every 3 seconds
         except Exception as e:
             logger.error(f"Error updating dashboard data: {e}")
-            await asyncio.sleep(5)
+            await asyncio.sleep(3)
 
 # Startup event
 @app.on_event("startup")
