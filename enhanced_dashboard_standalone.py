@@ -102,6 +102,22 @@ app.add_middleware(
 # Mount static files
 app.mount("/static", StaticFiles(directory="enhanced_dashboard/static"), name="static")
 
+# Serve direct /css and /js paths because the template (or cached page) requests them
+app.mount("/css", StaticFiles(directory="enhanced_dashboard/static/css"), name="css")
+app.mount("/js", StaticFiles(directory="enhanced_dashboard/static/js"), name="js")
+app.mount("/images", StaticFiles(directory="enhanced_dashboard/static/images"), name="images")
+
+# Favicon
+from fastapi.responses import FileResponse
+from pathlib import Path
+
+@app.get("/favicon.ico")
+async def favicon():
+    icon_path = Path("enhanced_dashboard/static/images/favicon.ico")
+    if icon_path.exists():
+        return FileResponse(icon_path)
+    return FileResponse(Path("enhanced_dashboard/static/images") / "favicon.png")  # fallback if you have one
+
 # Templates
 templates = Jinja2Templates(directory="enhanced_dashboard/templates")
 
@@ -217,208 +233,163 @@ async def debug_schema():
 # Account & Portfolio APIs
 @app.get("/api/account")
 async def get_account():
-    """Get account information with real metrics"""
-    try:
-        if not HAS_PSYCOPG2:
-            return {
-                "total_balance": 10000.0,
-                "total_pnl": 0.0,
-                "active_positions": 0,
-                "win_rate": 0.0,
-                "sharpe_ratio": 0.0,
-                "max_drawdown": 0.0
-            }
-            
+    """Overview KPIs."""
+    realized_pnl = 0.0
+    win_rate = 0.0
+    total_trades = 0
+
+    if HAS_PSYCOPG2:
         conn = await get_db_connection()
-        if not conn:
-            return {
-                "total_balance": 10000.0,
-                "total_pnl": 0.0,
-                "active_positions": 0,
-                "win_rate": 0.0,
-                "sharpe_ratio": 0.0,
-                "max_drawdown": 0.0
-            }
-            
-        try:
-            conn.rollback()
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            
-            # Realized PnL from closed trades
-            cursor.execute("""
-                SELECT COALESCE(SUM(pnl),0) AS realized_pnl, COUNT(*) AS total_trades,
-                       AVG(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) * 100 AS win_rate
-                FROM positions
-                WHERE is_open = false
-            """)
-            t = cursor.fetchone() or {}
-            
-            # Unrealized from current positions (with fresh prices)
-            positions = (await get_positions())["positions"]
-            unrealized = sum(p["pnl"] for p in positions)
-            active = len(positions)
-            
-            total_pnl = float(t.get("realized_pnl", 0)) + unrealized
-            # Use starting balance from config or default
-            starting_balance = 10000.0
-            total_balance = starting_balance + total_pnl
-            
-            # Optional: rough Sharpe / MDD if you have equity curve, else zeros
-            sharpe = 0.0
-            max_dd = 0.0
-            
-            cursor.close()
-            return {
-                "total_balance": round(total_balance, 2),
-                "total_pnl": round(total_pnl, 2),
-                "active_positions": active,
-                "win_rate": round(float(t.get("win_rate", 0)), 2),
-                "sharpe_ratio": round(sharpe, 2),
-                "max_drawdown": round(max_dd, 2),
-                "realized_pnl": round(float(t.get("realized_pnl", 0)), 2),
-                "unrealized_pnl": round(unrealized, 2),
-                "total_trades": int(t.get("total_trades", 0)),
-                "winning_trades": int(t.get("total_trades", 0) * float(t.get("win_rate", 0)) / 100),
-                "losing_trades": int(t.get("total_trades", 0) * (100 - float(t.get("win_rate", 0))) / 100),
-                "available_balance": max(0, total_balance),
-                "used_balance": abs(min(0, total_pnl)),
-                "initial_capital": starting_balance,
-                "last_update": datetime.utcnow().isoformat()
-            }
-            
-        except Exception as e:
-            logger.warning(f"Error getting account data: {e}")
-            conn.rollback()
-            return {
-                "total_balance": 10000.0,
-                "total_pnl": 0.0,
-                "active_positions": 0,
-                "win_rate": 0.0,
-                "sharpe_ratio": 0.0,
-                "max_drawdown": 0.0
-            }
-            
-    except Exception as e:
-        logger.error(f"Error getting account info: {e}")
-        return {
-            "total_balance": 10000.0,
-            "total_pnl": 0.0,
-            "active_positions": 0,
-            "win_rate": 0.0,
-            "sharpe_ratio": 0.0,
-            "max_drawdown": 0.0
-        }
+        if conn:
+            try:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute("""
+                    SELECT COALESCE(SUM(pnl),0) AS realized_pnl,
+                           COUNT(*) AS total_trades,
+                           AVG(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) * 100 AS win_rate
+                    FROM trades
+                    WHERE closed_at IS NOT NULL
+                """)
+                row = cur.fetchone() or {}
+                realized_pnl = float(row.get("realized_pnl") or 0.0)
+                total_trades = int(row.get("total_trades") or 0)
+                win_rate = float(row.get("win_rate") or 0.0)
+                cur.close()
+            except Exception as e:
+                logger.warning(f"Error aggregating trades: {e}")
+                conn.rollback()
+
+    positions = (await get_positions())["positions"]
+    unrealized = sum(p["pnl"] for p in positions)
+    active_positions = len(positions)
+
+    # If you have an account/equity table, use that here. Otherwise keep your baseline.
+    starting_balance = 10000.0
+    total_pnl = realized_pnl + unrealized
+    total_balance = starting_balance + total_pnl
+
+    return {
+        "total_balance": round(total_balance, 2),
+        "total_pnl": round(total_pnl, 2),
+        "active_positions": active_positions,
+        "win_rate": round(win_rate, 2),
+        "realized_pnl": round(realized_pnl, 2),
+        "unrealized_pnl": round(unrealized, 2),
+        "total_trades": total_trades,
+        "winning_trades": int(total_trades * win_rate / 100),
+        "losing_trades": int(total_trades * (100 - win_rate) / 100),
+        "available_balance": max(0, total_balance),
+        "used_balance": abs(min(0, total_pnl)),
+        "initial_capital": starting_balance,
+        "last_update": datetime.utcnow().isoformat()
+    }
 
 @app.get("/api/positions")
 async def get_positions():
-    """Get current positions with live prices and enhanced data"""
+    """Get current positions with live price from market_data.close (1m timeframe)."""
     try:
-        if not HAS_PSYCOPG2:
-            return {"positions": []}
-            
-        conn = await get_db_connection()
-        if not conn:
-            return {"positions": []}
-            
-        try:
-            conn.rollback()
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            
-            # 1) Pull open positions
-            cursor.execute("""
-                SELECT id, symbol, side, size, entry_price, current_price, strategy,
-                       created_at, updated_at, is_open, pnl, pnl_percentage
-                FROM positions
-                WHERE is_open = TRUE
-                ORDER BY updated_at DESC
-                LIMIT 500
-            """)
-            rows = cursor.fetchall()
-            
-            # 2) Map symbols for a batched market-data lookup
-            symbols = tuple({r["symbol"] for r in rows}) or tuple(["BTCUSDT"])  # avoid SQL error on empty tuple
-            
-            # 3) Fetch freshest price per symbol from your market_data/candles table
-            cursor.execute(f"""
-                SELECT md.symbol, md.price
-                FROM market_data md
-                JOIN (
-                    SELECT symbol, MAX(timestamp) AS ts
-                    FROM market_data
-                    WHERE symbol IN %s
-                    GROUP BY symbol
-                ) x ON x.symbol = md.symbol AND x.ts = md.timestamp
-            """, (symbols,))
-            latest = {r["symbol"]: float(r["price"]) for r in cursor.fetchall()}
-            
-            out = []
-            for r in rows:
-                sym = r["symbol"]
-                cp  = latest.get(sym, float(r["current_price"] or r["entry_price"]))
-                
-                size = float(r["size"] or 0)
-                entry = float(r["entry_price"] or 0)
-                side  = (r["side"] or "").lower()
-                
-                # Unrealized PnL (quote terms)
-                if side == "long":
-                    pnl = (cp - entry) * size
-                else:
-                    pnl = (entry - cp) * size
-                
-                pnl_pct = 0.0
-                if entry > 0:
-                    pnl_pct = (cp - entry)/entry*100 if side == "long" else (entry - cp)/entry*100
-                
-                # More decimals for small priced symbols
-                def fmt_price(x):
-                    return round(float(x), 6 if entry < 1 else 4)
-                
-                # Calculate duration
-                created_at = r.get('created_at') or r.get('timestamp')
-                if created_at:
-                    if hasattr(created_at, 'isoformat'):
-                        duration_seconds = (datetime.utcnow() - created_at).total_seconds()
-                    else:
-                        duration_seconds = (datetime.utcnow() - datetime.fromtimestamp(created_at.timestamp())).total_seconds()
-                    
-                    duration_hours = duration_seconds / 3600
-                    if duration_hours >= 24:
-                        duration_str = f"{int(duration_hours // 24)}d {int(duration_hours % 24)}h"
-                    elif duration_hours >= 1:
-                        duration_str = f"{int(duration_hours)}h {int((duration_seconds % 3600) / 60)}m"
-                    else:
-                        duration_str = f"{int(duration_seconds / 60)}m"
-                else:
-                    duration_str = "N/A"
-                    duration_hours = 0
-                
-                out.append({
-                    "id": r["id"],
-                    "symbol": sym,
-                    "side": side,
-                    "size": round(size, 6),
-                    "entry_price": fmt_price(entry),
-                    "current_price": fmt_price(cp),
-                    "pnl": round(pnl, 2),
-                    "pnl_percentage": round(pnl_pct, 2),
-                    "strategy": r["strategy"],
-                    "created_at": created_at.isoformat() if created_at and hasattr(created_at, 'isoformat') else None,
-                    "updated_at": r["updated_at"].isoformat() if r["updated_at"] and hasattr(r["updated_at"], 'isoformat') else None,
-                    "is_open": True,
-                    "duration": duration_str,
-                    "duration_hours": round(duration_hours, 2),
-                    "timestamp": created_at.isoformat() if created_at and hasattr(created_at, 'isoformat') else datetime.utcnow().isoformat()
-                })
-            
-            cursor.close()
-            return {"positions": out}
-            
-        except Exception as e:
-            logger.warning(f"Error getting positions: {e}")
-            conn.rollback()
-            return {"positions": []}
-            
+        out = []
+        if HAS_PSYCOPG2:
+            conn = await get_db_connection()
+            if conn:
+                try:
+                    conn.rollback()
+                    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+                    # 1) Open positions
+                    cur.execute("""
+                        SELECT id, symbol, side, size, entry_price, current_price, strategy,
+                               created_at, updated_at, is_open, pnl, pnl_percentage
+                        FROM positions
+                        WHERE is_open = TRUE
+                        ORDER BY created_at DESC
+                        LIMIT 1000
+                    """)
+                    positions = cur.fetchall() or []
+                    logger.info(f"Found {len(positions)} positions in database")
+                    if positions:
+                        logger.info(f"Sample position columns: {list(positions[0].keys())}")
+                        logger.info(f"Sample position data: {positions[0]}")
+
+                    symbols = tuple({p["symbol"] for p in positions})
+                    latest = {}
+
+                    if symbols:
+                        # 2) Latest candle per symbol (1m timeframe)
+                        cur.execute(f"""
+                            SELECT md.symbol, md.close AS price
+                            FROM market_data md
+                            JOIN (
+                                SELECT symbol, MAX(timestamp) AS ts
+                                FROM market_data
+                                WHERE timeframe = '1m' AND symbol IN %s
+                                GROUP BY symbol
+                            ) x ON x.symbol = md.symbol AND x.ts = md.timestamp
+                            WHERE md.timeframe = '1m'
+                        """, (symbols,))
+                        latest = {r["symbol"]: float(r["price"]) for r in cur.fetchall()}
+
+                    def fmt_price(entry, x):
+                        # more decimals for sub-$1 assets, otherwise 4 dp
+                        return round(float(x), 6 if float(entry or 0) < 1 else 4)
+
+                    for pos in positions:
+                        sym = pos["symbol"]
+                        entry = float(pos["entry_price"] or 0)
+                        size = float(pos["size"] or 0)
+                        side = (pos["side"] or "").lower()
+                        cp = latest.get(sym, float(pos["current_price"] or entry))
+
+                        if side == "long":
+                            pnl = (cp - entry) * size
+                            pnl_pct = ((cp - entry) / entry * 100) if entry > 0 else 0.0
+                        else:
+                            pnl = (entry - cp) * size
+                            pnl_pct = ((entry - cp) / entry * 100) if entry > 0 else 0.0
+
+                        # Calculate duration
+                        created_at = pos.get('created_at') or pos.get('timestamp')
+                        if created_at:
+                            if hasattr(created_at, 'isoformat'):
+                                duration_seconds = (datetime.utcnow() - created_at).total_seconds()
+                            else:
+                                duration_seconds = (datetime.utcnow() - datetime.fromtimestamp(created_at.timestamp())).total_seconds()
+                            
+                            duration_hours = duration_seconds / 3600
+                            if duration_hours >= 24:
+                                duration_str = f"{int(duration_hours // 24)}d {int(duration_hours % 24)}h"
+                            elif duration_hours >= 1:
+                                duration_str = f"{int(duration_hours)}h {int((duration_seconds % 3600) / 60)}m"
+                            else:
+                                duration_str = f"{int(duration_seconds / 60)}m"
+                        else:
+                            duration_str = "N/A"
+                            duration_hours = 0
+
+                        out.append({
+                            "id": pos["id"],
+                            "symbol": sym,
+                            "side": side,
+                            "size": round(size, 6),
+                            "entry_price": fmt_price(entry, entry),
+                            "current_price": fmt_price(entry, cp),
+                            "pnl": round(pnl, 2),
+                            "pnl_percentage": round(pnl_pct, 2),
+                            "strategy": pos.get("strategy", "N/A"),
+                            "created_at": pos["created_at"].isoformat() if pos.get("created_at") else None,
+                            "updated_at": pos["updated_at"].isoformat() if pos.get("updated_at") else None,
+                            "is_open": True,
+                            "duration": duration_str,
+                            "duration_hours": round(duration_hours, 2),
+                            "timestamp": created_at.isoformat() if created_at and hasattr(created_at, 'isoformat') else datetime.utcnow().isoformat()
+                        })
+
+                    cur.close()
+                except Exception as e:
+                    logger.warning(f"Error getting positions: {e}")
+                    conn.rollback()
+
+        return {"positions": out}
     except Exception as e:
         logger.error(f"Error getting positions: {e}")
         return {"positions": []}
@@ -644,184 +615,157 @@ async def get_performance():
 
 # Additional API endpoints for dashboard functionality
 @app.get("/api/analytics/strategy-performance")
-async def get_strategy_performance():
-    """Get strategy performance analytics with real data"""
+async def strategy_perf():
+    """Per-strategy aggregation from closed positions or trades."""
+    if not HAS_PSYCOPG2:
+        return {"strategies": []}
+    conn = await get_db_connection()
+    if not conn:
+        return {"strategies": []}
     try:
-        if not HAS_PSYCOPG2:
-            return {"strategies": []}
-            
-        conn = await get_db_connection()
-        if not conn:
-            return {"strategies": []}
-            
-        try:
-            conn.rollback()
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            
-            cursor.execute("""
-                SELECT strategy,
-                       COUNT(*) AS trades,
-                       AVG(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) * 100 AS win_rate,
-                       SUM(pnl) AS total_pnl,
-                       AVG(pnl) AS avg_pnl
-                FROM positions
-                WHERE is_open = false
-                GROUP BY strategy
-                ORDER BY total_pnl DESC
-            """)
-            rows = cursor.fetchall() or []
-            
-            strategies = []
-            for r in rows:
-                strategies.append({
-                    "strategy": r["strategy"],
-                    "trades": int(r["trades"]),
-                    "win_rate": round(float(r["win_rate"]), 2),
-                    "total_pnl": round(float(r["total_pnl"]), 2),
-                    "avg_pnl": round(float(r["avg_pnl"]), 2),
-                    "sharpe_ratio": 0.0  # compute if you later store per-period returns
-                })
-            
-            cursor.close()
-            return {"strategies": strategies}
-            
-        except Exception as e:
-            logger.warning(f"Error getting strategy performance: {e}")
-            conn.rollback()
-            return {"strategies": []}
-            
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT strategy,
+                   COUNT(*) AS trades,
+                   AVG(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) * 100 AS win_rate,
+                   SUM(pnl) AS total_pnl,
+                   AVG(pnl) AS avg_pnl
+            FROM trades
+            WHERE closed_at IS NOT NULL
+            GROUP BY strategy
+            ORDER BY total_pnl DESC
+        """)
+        rows = cur.fetchall() or []
+        cur.close()
+        for r in rows:
+            r["sharpe_ratio"] = 0.0
+        return {"strategies": rows}
     except Exception as e:
-        logger.error(f"Error getting strategy performance: {e}")
+        logger.warning(f"Error computing strategy performance: {e}")
+        conn.rollback()
         return {"strategies": []}
 
 @app.get("/api/analytics/risk-metrics")
 async def get_risk_metrics():
-    """Get risk management metrics with real calculations"""
+    """Basic risk: VaR (historical), volatility, max drawdown from closed trades."""
+    from statistics import pstdev
+    
+    # Defaults
+    out = {"var95": 0.0, "var99": 0.0, "volatility": 0.0, "beta": 0.0, "max_drawdown": 0.0}
+    if not HAS_PSYCOPG2:
+        return out
+
+    conn = await get_db_connection()
+    if not conn:
+        return out
+
     try:
-        if not HAS_PSYCOPG2:
-            return {"var95": 0.0, "var99": 0.0, "volatility": 0.0, "beta": 0.0, "max_drawdown": 0.0}
-            
-        conn = await get_db_connection()
-        if not conn:
-            return {"var95": 0.0, "var99": 0.0, "volatility": 0.0, "beta": 0.0, "max_drawdown": 0.0}
-            
-        try:
-            conn.rollback()
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            
-            # Get PnL data for risk calculations
-            cursor.execute("""
-                SELECT pnl, closed_at
-                FROM positions
-                WHERE is_open = false
-                ORDER BY closed_at ASC
-                LIMIT 3000
-            """)
-            rows = cursor.fetchall() or []
-            
-            if not rows:
-                return {"var95": 0.0, "var99": 0.0, "volatility": 0.0, "beta": 0.0, "max_drawdown": 0.0}
-            
-            pnls = [float(r["pnl"]) for r in rows]
-            
-            # Calculate volatility (standard deviation)
-            if len(pnls) > 1:
-                mean_pnl = sum(pnls) / len(pnls)
-                variance = sum((x - mean_pnl) ** 2 for x in pnls) / (len(pnls) - 1)
-                volatility = variance ** 0.5
-            else:
-                volatility = 0.0
-            
-            # Calculate VaR (Value at Risk)
-            pnls_sorted = sorted(pnls)
-            def percentile(vals, p):
-                if not vals: return 0.0
-                k = max(0, min(len(vals)-1, int(round((p/100.0)*(len(vals)-1)))))
-                return vals[k]
-            
-            var95 = min(0.0, percentile(pnls_sorted, 5))   # as a loss number
-            var99 = min(0.0, percentile(pnls_sorted, 1))
-            
-            # Calculate maximum drawdown
-            equity = 10000.0
-            peak = equity
-            max_dd = 0.0
-            for pnl in pnls:
-                equity += pnl
-                peak = max(peak, equity)
-                dd = (equity - peak) / peak if peak > 0 else 0.0
-                max_dd = min(max_dd, dd)
-            
-            cursor.close()
-            return {
-                "var95": round(var95, 2),
-                "var99": round(var99, 2),
-                "volatility": round(volatility, 2),
-                "beta": 0.0,  # keep 0 unless you benchmark against BTC/ETH returns
-                "max_drawdown": round(abs(max_dd)*100, 2)
-            }
-            
-        except Exception as e:
-            logger.warning(f"Error getting risk metrics: {e}")
-            conn.rollback()
-            return {"var95": 0.0, "var99": 0.0, "volatility": 0.0, "beta": 0.0, "max_drawdown": 0.0}
-            
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT pnl, closed_at
+            FROM trades
+            WHERE closed_at IS NOT NULL
+            ORDER BY closed_at ASC
+            LIMIT 5000
+        """)
+        rows = cur.fetchall() or []
+        cur.close()
     except Exception as e:
-        logger.error(f"Error getting risk metrics: {e}")
-        return {"var95": 0.0, "var99": 0.0, "volatility": 0.0, "beta": 0.0, "max_drawdown": 0.0}
+        logger.warning(f"Error getting risk metrics: {e}")
+        conn.rollback()
+        return out
+
+    if not rows:
+        return out
+
+    pnls = [float(r["pnl"]) for r in rows]
+    vol = pstdev(pnls) if len(pnls) > 1 else 0.0
+    pnls_sorted = sorted(pnls)
+
+    def percentile(vals, p):
+        if not vals: return 0.0
+        k = max(0, min(len(vals)-1, int(round((p/100.0)*(len(vals)-1)))))
+        return vals[k]
+
+    var95 = min(0.0, percentile(pnls_sorted, 5))
+    var99 = min(0.0, percentile(pnls_sorted, 1))
+
+    equity = 10000.0
+    peak = equity
+    max_dd = 0.0
+    for pnl in pnls:
+        equity += pnl
+        if equity > peak: peak = equity
+        dd = (equity - peak) / peak if peak > 0 else 0.0
+        if dd < max_dd: max_dd = dd
+
+    out.update({
+        "var95": round(var95, 2),
+        "var99": round(var99, 2),
+        "volatility": round(vol, 2),
+        "beta": 0.0,
+        "max_drawdown": round(abs(max_dd) * 100, 2)
+    })
+    return out
 
 @app.get("/api/market-data")
-async def get_market_data():
-    """Get market data from database"""
+async def market_data():
+    """24h OHLCV stats from market_data (1m timeframe)."""
+    if not HAS_PSYCOPG2:
+        return {"market": []}
+    conn = await get_db_connection()
+    if not conn:
+        return {"market": []}
+
     try:
-        if not HAS_PSYCOPG2:
-            return {"market": []}
-            
-        conn = await get_db_connection()
-        if not conn:
-            return {"market": []}
-            
-        try:
-            conn.rollback()
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            
-            # Get market data for symbols in positions and trades
-            cursor.execute("""
-                WITH universe AS (
-                  SELECT DISTINCT symbol FROM positions
-                  UNION
-                  SELECT DISTINCT symbol FROM trades
-                )
-                SELECT u.symbol,
-                       md.price,
-                       md.change_24h,
-                       md.volume_24h,
-                       md.high_24h,
-                       md.low_24h
-                FROM universe u
-                JOIN LATERAL (
-                  SELECT *
-                  FROM market_data m
-                  WHERE m.symbol = u.symbol
-                  ORDER BY timestamp DESC
-                  LIMIT 1
-                ) md ON TRUE
-                ORDER BY u.symbol
-                LIMIT 200
-            """)
-            rows = cursor.fetchall() or []
-            
-            # Fallback: if empty, return nothing (don't hardcode BTC/ETH)
-            cursor.close()
-            return {"market": rows}
-            
-        except Exception as e:
-            logger.warning(f"Error getting market data: {e}")
-            conn.rollback()
-            return {"market": []}
-            
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # Build a small universe: symbols seen in positions or trades (last 2 days)
+        cur.execute("""
+            WITH universe AS (
+              SELECT DISTINCT symbol FROM positions
+              UNION
+              SELECT DISTINCT symbol FROM trades
+            ),
+            last24 AS (
+              SELECT md.symbol, md.timestamp, md.close, md.volume
+              FROM market_data md
+              JOIN universe u ON u.symbol = md.symbol
+              WHERE md.timeframe = '1m' AND md.timestamp >= NOW() - INTERVAL '24 hours'
+            )
+            SELECT l.symbol,
+                   (SELECT l2.close FROM last24 l2 WHERE l2.symbol = l.symbol ORDER BY l2.timestamp DESC LIMIT 1) AS price,
+                   (( (SELECT l2.close FROM last24 l2 WHERE l2.symbol = l.symbol ORDER BY l2.timestamp DESC LIMIT 1)
+                     - (SELECT l3.close FROM last24 l3 WHERE l3.symbol = l.symbol ORDER BY l3.timestamp ASC  LIMIT 1)
+                    )
+                    / NULLIF((SELECT l3.close FROM last24 l3 WHERE l3.symbol = l.symbol ORDER BY l3.timestamp ASC LIMIT 1), 0)
+                   ) * 100.0 AS change_24h,
+                   SUM(l.volume) AS volume_24h,
+                   MAX(l.close) AS high_24h,
+                   MIN(l.close) AS low_24h
+            FROM last24 l
+            GROUP BY l.symbol
+            ORDER BY l.symbol
+            LIMIT 200
+        """)
+        rows = cur.fetchall() or []
+        cur.close()
+
+        # Format a bit
+        out = []
+        for r in rows:
+            out.append({
+                "symbol": r["symbol"],
+                "price": round(float(r["price"] or 0), 6),
+                "change_24h": round(float(r["change_24h"] or 0), 2),
+                "volume_24h": float(r["volume_24h"] or 0),
+                "high_24h": round(float(r["high_24h"] or 0), 6),
+                "low_24h": round(float(r["low_24h"] or 0), 6),
+            })
+        return {"market": out}
     except Exception as e:
-        logger.error(f"Error getting market data: {e}")
+        logger.warning(f"Error getting market data: {e}")
+        conn.rollback()
         return {"market": []}
 
 @app.get("/api/config")
@@ -866,6 +810,10 @@ async def get_config():
                     cfg["min_volume_ratio"] = risk_config.get("min_volume_ratio", cfg["min_volume_ratio"])
             except Exception as e:
                 logger.warning(f"Error reading config.yaml: {e}")
+        
+        # Back-compat for UI field names
+        cfg["stop_loss_percent"] = cfg.get("stop_loss", 1.0)
+        cfg["take_profit_percent"] = cfg.get("take_profit", 2.5)
         
         return cfg
         
