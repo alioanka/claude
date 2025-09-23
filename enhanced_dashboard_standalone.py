@@ -757,86 +757,72 @@ async def risk_limits():
 
 @app.get("/api/market-data")
 async def market_data():
-    """24h OHLCV stats from market_data (1m timeframe) for symbols in positions/trades."""
+    """Return 24h OHLCV + last price from market_data.close for symbols we actually trade."""
     if not HAS_PSYCOPG2:
-        return {"market": []}
+        return {"market_data": []}
     conn = await get_db_connection()
     if not conn:
-        return {"market": []}
+        return {"market_data": []}
 
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        # Build a universe from your actual symbols; if empty, return []
-        cur.execute("""
-            WITH universe AS (
-              SELECT DISTINCT symbol FROM positions
-              UNION
-              SELECT DISTINCT symbol FROM trades
-            )
-            SELECT symbol FROM universe
-        """)
-        syms = [r["symbol"] for r in cur.fetchall() or []]
-        if not syms:
-            cur.close()
-            return {"market": []}
 
-        # 24h window by symbol - use close as price
+        # Use symbols that exist in your data (positions/trades)
         cur.execute("""
             WITH universe AS (
               SELECT DISTINCT symbol FROM positions
               UNION
               SELECT DISTINCT symbol FROM trades
             ),
-            latest AS (
-              SELECT m.symbol, m.close AS price
-              FROM market_data m
+            last24 AS (
+              SELECT md.symbol, md.timestamp, md.close, md.volume, md.high, md.low
+              FROM market_data md
+              WHERE md.timeframe = '1m'
+                AND md.symbol IN (SELECT symbol FROM universe)
+                AND md.timestamp >= NOW() - INTERVAL '24 hours'
+            ),
+            last_price AS (
+              SELECT l.symbol, l.close AS price
+              FROM last24 l
               JOIN (
                 SELECT symbol, MAX(timestamp) AS ts
-                FROM market_data
-                WHERE timeframe = '1m'
+                FROM last24
                 GROUP BY symbol
-              ) x ON x.symbol = m.symbol AND x.ts = m.timestamp
-              WHERE m.timeframe = '1m'
+              ) x ON x.symbol = l.symbol AND x.ts = l.timestamp
             )
-            SELECT m.symbol,
-                   l.price                             AS price,
-                   MAX(m.high)                         AS high_24h,
-                   MIN(m.low)                          AS low_24h,
-                   SUM(m.volume)                       AS volume_24h,
-                   ( (l.price - FIRST_VALUE(m.close) OVER (PARTITION BY m.symbol ORDER BY m.timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING))
-                     / NULLIF(FIRST_VALUE(m.close) OVER (PARTITION BY m.symbol ORDER BY m.timestamp ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), 0) * 100
-                   )                                   AS change_24h
-            FROM market_data m
-            JOIN universe u ON u.symbol = m.symbol
-            JOIN latest   l ON l.symbol = m.symbol
-            WHERE m.timeframe = '1m'
-              AND m.timestamp >= NOW() - INTERVAL '24 hours'
-            GROUP BY m.symbol, l.price
-            ORDER BY m.symbol
+            SELECT l.symbol,
+                   lp.price,
+                   ( (lp.price - MIN(l.close)) / NULLIF(MIN(l.close),0) ) * 100.0 AS change_24h,
+                   SUM(l.volume)  AS volume_24h,
+                   MAX(l.high)    AS high_24h,
+                   MIN(l.low)     AS low_24h
+            FROM last24 l
+            JOIN last_price lp ON lp.symbol = l.symbol
+            GROUP BY l.symbol, lp.price
+            ORDER BY l.symbol
             LIMIT 200
         """)
         rows = cur.fetchall() or []
         cur.close()
 
-        # If there's still nothing (no candles), return []
         out = []
         for r in rows:
-            # skip symbols without any price in 24h (avoid zeros)
             if r["price"] is None:
                 continue
             out.append({
                 "symbol": r["symbol"],
-                "price": round(float(r["price"] or 0), 6),
+                "price": round(float(r["price"]), 6),
                 "change_24h": round(float(r["change_24h"] or 0), 2),
                 "volume_24h": float(r["volume_24h"] or 0),
                 "high_24h": round(float(r["high_24h"] or 0), 6),
                 "low_24h": round(float(r["low_24h"] or 0), 6),
             })
-        return {"market": out}
+        return {"market_data": out}
     except Exception as e:
         logger.warning(f"Error getting market data: {e}")
         conn.rollback()
-        return {"market": []}
+        return {"market_data": []}
+
 
 @app.get("/api/config")
 async def get_config():

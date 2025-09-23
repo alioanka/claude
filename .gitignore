@@ -147,7 +147,7 @@ profiling/
 
 # Static files
 staticfiles/
-static/
+
 
 # Media files
 media/
